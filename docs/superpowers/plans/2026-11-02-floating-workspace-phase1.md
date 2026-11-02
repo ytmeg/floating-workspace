@@ -12,7 +12,7 @@
 
 - Approved spec: `docs/superpowers/specs/2026-11-02-floating-workspace-phase1-design.md`; Phase 1 implements note and blank modes only.
 - Use public AppKit and Carbon only. No SkyLight, private APIs, SIP changes, injection, Accessibility or Screen Recording permission, third-party dependency, account, telemetry, or Phase 1 networking.
-- Use `xcrun swift`; full Xcode and `xcodebuild` are unavailable.
+- Xcode 27.2 is installed at `/Applications/Xcode.app/Contents/Developer`. Prefix build/test commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` because `xcode-select` still points to Command Line Tools; do not change the global selection.
 - `NSPanel.isFloatingPanel = true`, `hidesOnDeactivate = false`; pinned level is `.floating`, unpinned level is `.normal`.
 - Layout is the approved left rail with all four entries; image and web entries are visible but disabled in Phase 1. Do not create an image editor or WebView.
 - Default window is `520 × 540` pt, minimum `360 × 320` pt, note font is 16 pt.
