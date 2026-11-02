@@ -7,6 +7,7 @@ public final class FloatingWindowController: NSObject {
     public let panel: NSPanel
 
     private let store: ContentStore
+    private var workspaceViewController: WorkspaceViewController?
     private var contentSubscription: AnyCancellable?
 
     public init(store: ContentStore) {
@@ -23,6 +24,10 @@ public final class FloatingWindowController: NSObject {
         panel.hidesOnDeactivate = false
         panel.minSize = NSSize(width: 360, height: 320)
         panel.setFrameAutosaveName("FloatingWorkspaceFrame")
+
+        let workspace = WorkspaceViewController(store: store, windowController: self)
+        workspaceViewController = workspace
+        panel.contentViewController = workspace
 
         contentSubscription = store.$content.sink { [weak self] content in
             self?.apply(content)
