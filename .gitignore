@@ -1,2 +1,7 @@
 .worktrees/
 .superpowers/
+.build/
+.swiftpm/
+.artifacts/
+dist/
+.DS_Store
