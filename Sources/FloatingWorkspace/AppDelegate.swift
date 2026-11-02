@@ -10,7 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var terminationReplyHandler: (Bool) -> Void = {
         NSApp.reply(toApplicationShouldTerminate: $0)
     }
-    var alertPresenter: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
+    var alertPresenter: (NSAlert) -> NSApplication.ModalResponse = {
+        NSApp.activate(ignoringOtherApps: true)
+        return $0.runModal()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let fileURL = Self.workspaceFileURL()
