@@ -16,11 +16,34 @@
    open dist/FloatingWorkspace.app
    ```
 
-3. 除默认启动冒烟外，每个用例设置独立的 `FLOATING_WORKSPACE_STORE_URL`，避免改写真实工作区。完整文件 URL 和 POSIX 路径均可。
-4. 日期化终端输出、辅助脚本和截图仅保存到 `.artifacts/acceptance/`。截图不是必选项；不得为取证授予 Screen Recording 权限。
-5. 操作真实窗口时，等待目标应用确实成为 frontmost、目标 alert 确实出现，再发送输入或记录结果。不要把 `activate` 调用返回当成 frontmost 已成立。
-6. 八组全程确认：没有 Accessibility 或 Screen Recording 权限提示，没有 SkyLight/私有 API 依赖，Phase 1 进程没有网络请求。可用 `lsof -nP -a -p <pid> -i` 和交互期间的网络进程采样辅助确认无网络连接。
-7. 每个用例结束后通过菜单正常退出；保存失败用例使用明确的放弃退出按钮。清理自己启动的 Safari、Notes 和 IDE，但不修改其中已有内容。
+3. 除默认启动冒烟外，每个用例设置独立的 `FLOATING_WORKSPACE_STORE_URL`，避免改写真实工作区。完整文件 URL 和 POSIX 路径均可。同时运行的实例不得共用同一数据文件，否则会互相覆盖。
+4. `FLOATING_WORKSPACE_STORE_URL` 不隔离窗口 frame。frame 保存在 UserDefaults 域 `local.floatingworkspace`，验收会改写它。任何验收实例启动前先记录原值（包括不存在的情况）：
+
+   ```bash
+   RUN="$PWD/.artifacts/acceptance/<run>"
+   mkdir -p "$RUN"
+   FRAME_KEY="NSWindow Frame FloatingWorkspaceFrame"
+   if defaults read local.floatingworkspace "$FRAME_KEY" > "$RUN/frame-before.txt" 2>/dev/null; then
+     echo present > "$RUN/frame-before.state"
+   else
+     echo absent > "$RUN/frame-before.state"
+   fi
+   ```
+5. 日期化终端输出、辅助脚本和截图仅保存到 `.artifacts/acceptance/`。截图不是必选项；不得为取证授予 Screen Recording 权限。
+6. 操作真实窗口时，等待目标应用确实成为 frontmost、目标 alert 确实出现，再发送输入或记录结果。不要把 `activate` 调用返回当成 frontmost 已成立。
+7. 八组全程确认：没有 Accessibility 或 Screen Recording 权限提示，没有 SkyLight/私有 API 依赖，Phase 1 进程没有网络请求。可用 `lsof -nP -a -p <pid> -i` 和交互期间的网络进程采样辅助确认无网络连接。
+8. 每个用例结束后通过菜单正常退出；保存失败用例使用明确的放弃退出按钮。清理自己启动的 Safari、Notes 和 IDE，但不修改其中已有内容。
+9. 全部实例退出后恢复 frame，并核对结果与记录一致：
+
+   ```bash
+   if [[ "$(cat "$RUN/frame-before.state")" == present ]]; then
+     defaults write local.floatingworkspace "$FRAME_KEY" -string "$(cat "$RUN/frame-before.txt")"
+     test "$(defaults read local.floatingworkspace "$FRAME_KEY")" = "$(cat "$RUN/frame-before.txt")"
+   else
+     defaults delete local.floatingworkspace "$FRAME_KEY" 2>/dev/null || true
+     ! defaults read local.floatingworkspace "$FRAME_KEY" 2>/dev/null
+   fi
+   ```
 
 以下命令中的 `$APP` 均指：
 
@@ -37,17 +60,18 @@ APP="$PWD/dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace"
 
 通过标准：三种目标应用下，已编辑便签保持可见且置顶；应用切换没有非预期焦点窃取。
 
-## 2. 快捷键与菜单切换同一面板
+## 2. 快捷键、标题栏图钉与菜单切换同一面板
 
 1. 保持第 1 组的同一实例和同一个面板。分别让 Safari、Notes 和 IDE frontmost，等待真实 frontmost 条件后按 `⌃⌥⌘P`。
 2. 每次按键后确认该面板在 `.floating` 与 `.normal` 间切换，隔离 JSON 中 `isPinned` 同步改变。取消置顶后重新激活目标应用，面板应处于普通层级；再次按键恢复置顶。
-3. 使用菜单栏 `切换置顶` 再执行往返切换，确认窗口层级与 `isPinned` 跟随同一面板变化。
+3. 使用菜单栏 `切换置顶` 再执行往返切换，确认窗口层级与 `isPinned` 跟随同一面板变化。每次打开菜单时，`切换置顶` 的勾选状态与当前 `isPinned` 一致。
+4. 点击浮窗标题栏右侧图钉按钮执行往返切换。确认按钮标题在 `已置顶` 与 `未置顶` 间变化，窗口层级与 `isPinned` 同步；再用快捷键或菜单切换一次，确认图钉按钮状态随之刷新。
 
-通过标准：快捷键和菜单操作同一实例、同一面板；两种入口都能完成 `.floating` → `.normal` → `.floating`。
+通过标准：快捷键、标题栏图钉和菜单操作同一实例、同一面板；三种入口都能完成 `.floating` → `.normal` → `.floating`，标题栏和菜单显示的置顶状态始终与 `isPinned` 一致。
 
 ## 3. 空白模式即时生效与持久化
 
-1. 在同一最终 app 实例切换到 `空白`，输入可识别标题，修改背景颜色、宽度和高度，并确认各字段的实际提交动作。
+1. 在同一最终 app 实例切换到 `空白`，输入可识别标题，修改背景颜色、宽度和高度，并确认各字段的实际提交动作。输入小于最小值的宽度时，字段回写为实际宽度 `360`；拖动缩放窗口后，宽高字段同步为当前 frame。
 2. 每次修改后立即检查窗口标题/背景/frame 和保存状态，不等待重启才判定即时生效。
 3. 通过菜单安全退出并重启同一隔离数据文件，确认空白标题、背景颜色、宽度和高度全部恢复。
 
@@ -57,7 +81,7 @@ APP="$PWD/dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace"
 
 1. 使用同一隔离数据文件，编辑便签文本，选择目标模式，移动并缩放窗口，切换一次置顶状态。
 2. 等自动保存完成后，通过菜单安全退出，再启动最终 app。
-3. 对照退出前的 JSON 和窗口记录，检查便签文本、`selectedMode`、frame 与 `isPinned`。
+3. 对照退出前的 JSON、`defaults read local.floatingworkspace "NSWindow Frame FloatingWorkspaceFrame"` 和窗口记录，检查便签文本、`selectedMode`、frame 与 `isPinned`。frame 不在 JSON 中。
 
 通过标准：便签内容、所选模式、窗口 frame、置顶状态均跨 relaunch 恢复。
 
@@ -104,4 +128,4 @@ APP="$PWD/dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace"
 
 ## 完成判定
 
-只有自动化测试、release 构建、签名校验及以上八组最终 app 验收全部通过，才能声明 Phase 1 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。
+只有自动化测试、release 构建、签名校验及以上八组最终 app 验收全部通过，并按准备第 9 步恢复窗口 frame，才能声明 Phase 1 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。
