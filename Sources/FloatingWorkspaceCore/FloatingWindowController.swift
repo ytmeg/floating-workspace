@@ -29,8 +29,15 @@ public final class FloatingWindowController: NSObject {
         panel.contentViewController = workspace
         let frameAutosaveName: NSWindow.FrameAutosaveName = "FloatingWorkspaceFrame"
         panel.setFrameAutosaveName(frameAutosaveName)
+        // AppKit's autosave key and string format are undocumented.
+        // setFrame(from:) cascades the saved origin on this macOS, so restore it explicitly.
         if let savedFrame = UserDefaults.standard.string(forKey: "NSWindow Frame \(frameAutosaveName)") {
-            panel.setFrame(NSRectFromString(savedFrame), display: false)
+            let restoredFrame = NSRectFromString(savedFrame)
+            if restoredFrame.width >= panel.minSize.width,
+               restoredFrame.height >= panel.minSize.height,
+               NSScreen.screens.contains(where: { $0.visibleFrame.intersects(restoredFrame) }) {
+                panel.setFrame(restoredFrame, display: false)
+            }
         }
         workspace.updateBlankSizeFields()
 

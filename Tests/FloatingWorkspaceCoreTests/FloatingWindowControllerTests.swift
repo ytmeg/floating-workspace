@@ -68,6 +68,29 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertEqual(workspace.heightField.stringValue, "700")
     }
 
+    func testOffScreenSavedFrameEndsOnVisibleScreen() throws {
+        UserDefaults.standard.set(
+            "-50000 160 640 700 0 0 1512 949 ",
+            forKey: "NSWindow Frame FloatingWorkspaceFrame"
+        )
+
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+
+        XCTAssertTrue(NSScreen.screens.contains { $0.visibleFrame.intersects(controller.panel.frame) })
+    }
+
+    func testGarbageSavedFrameDoesNotProduceZeroOrBelowMinimumFrame() throws {
+        UserDefaults.standard.set("not-a-frame", forKey: "NSWindow Frame FloatingWorkspaceFrame")
+
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+
+        XCTAssertNotEqual(controller.panel.frame, .zero)
+        XCTAssertGreaterThanOrEqual(controller.panel.frame.width, controller.panel.minSize.width)
+        XCTAssertGreaterThanOrEqual(controller.panel.frame.height, controller.panel.minSize.height)
+    }
+
     func testPinningUpdatesStoreAndPanelLevel() throws {
         let doubles = try ContentStoreTestDoubles()
         let controller = FloatingWindowController(store: doubles.store)
