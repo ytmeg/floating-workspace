@@ -134,6 +134,21 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.workspace.heightField.stringValue, "600")
     }
 
+    func testInstalledBlankLayoutAllowsMinimumWidth() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let window = FloatingWindowController(store: doubles.store)
+        let workspace = try XCTUnwrap(window.panel.contentViewController as? WorkspaceViewController)
+        workspace.selectMode(.blank)
+        workspace.widthField.stringValue = "100"
+        workspace.heightField.stringValue = "600"
+
+        workspace.blankSizeChanged()
+        window.panel.layoutIfNeeded()
+
+        XCTAssertEqual(window.panel.frame.width, 360)
+        XCTAssertEqual(workspace.widthField.stringValue, "360")
+    }
+
     func testEditingWidthAfterResizeKeepsCurrentHeight() throws {
         let fixture = try makeWorkspace()
         fixture.workspace.selectMode(.blank)

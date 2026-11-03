@@ -189,11 +189,15 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         grid.translatesAutoresizingMaskIntoConstraints = false
         blankContainer.addSubview(grid)
 
+        // The preferred title width yields to the panel's 360 pt minimum width instead of raising it.
+        let preferredTitleWidth = blankTitleField.widthAnchor.constraint(equalToConstant: 240)
+        preferredTitleWidth.priority = .defaultLow
         NSLayoutConstraint.activate([
             grid.leadingAnchor.constraint(equalTo: blankContainer.leadingAnchor, constant: 20),
             grid.topAnchor.constraint(equalTo: blankContainer.topAnchor, constant: 20),
             grid.trailingAnchor.constraint(lessThanOrEqualTo: blankContainer.trailingAnchor, constant: -20),
-            blankTitleField.widthAnchor.constraint(equalToConstant: 240),
+            preferredTitleWidth,
+            blankTitleField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             blankTitleField.heightAnchor.constraint(equalToConstant: 28),
             colorWell.widthAnchor.constraint(equalToConstant: 64),
             colorWell.heightAnchor.constraint(equalToConstant: 32),
