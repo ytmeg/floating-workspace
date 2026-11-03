@@ -634,7 +634,7 @@ xcrun swift build --product FloatingWorkspace
 .build/debug/FloatingWorkspace
 ```
 
-Verify note editing, blank controls, hide/show, and `⌃⌥⌘P` against Safari, Notes, and the installed IDE. Keep one instance running and launch a second to force hotkey conflict; the second shows a numeric error and its menu still works. Use a temporary `FLOATING_WORKSPACE_STORE_URL` to verify corrupt-file recovery and a path under `/dev/null/` to verify save failure and retry/discard termination without touching real content.
+Verify note editing, blank controls, hide/show, and `⌃⌥⌘P` against Safari, Notes, and the installed IDE. Verify numeric hotkey conflict deterministically with a duplicate registration in one process (`eventHotKeyExistsErr`, numeric code `-9878`). Separately launch a second app instance with an isolated store: this macOS permits duplicate cross-process registration, so no conflict alert is required; verify its menu actions still work. Use a temporary `FLOATING_WORKSPACE_STORE_URL` to verify corrupt-file recovery and a path under `/dev/null/` to verify save failure and retry/discard termination without touching real content.
 
 - [ ] **Step 5: Run all tests and commit**
 
@@ -693,7 +693,7 @@ Create `docs/testing/floating-workspace-phase1-acceptance.md` covering all eight
 3. Blank title/background/width/height apply immediately and survive relaunch.
 4. Note, selected mode, frame, and pin state survive relaunch.
 5. Hide/show works from the menu bar with no Dock icon.
-6. A second app instance produces a numeric hotkey conflict while menu actions remain usable.
+6. A duplicate registration in one process produces numeric `eventHotKeyExistsErr` (`-9878`) and menu actions remain usable. A second app instance is allowed by this macOS and must have working menu actions; no cross-process conflict alert is required.
 7. `FLOATING_WORKSPACE_STORE_URL=/dev/null/workspace-v1.json` produces visible save failure; retry and explicit discard termination behave as designed.
 8. An isolated invalid JSON file is moved to a timestamped backup; app starts with defaults and shows recovery information.
 
