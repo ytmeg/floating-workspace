@@ -1,13 +1,19 @@
 import AppKit
 
 @MainActor
-public final class MenuBarController: NSObject {
+public final class MenuBarController: NSObject, NSMenuDelegate {
     public let statusItem: NSStatusItem
     private let windowController: FloatingWindowController
+    private let togglePinItem: NSMenuItem
 
     public init(windowController: FloatingWindowController) {
         self.windowController = windowController
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        togglePinItem = NSMenuItem(
+            title: "切换置顶",
+            action: #selector(togglePinned),
+            keyEquivalent: ""
+        )
         super.init()
 
         if let image = NSImage(
@@ -28,13 +34,8 @@ public final class MenuBarController: NSObject {
         showHide.target = self
         menu.addItem(showHide)
 
-        let togglePin = NSMenuItem(
-            title: "切换置顶",
-            action: #selector(togglePinned),
-            keyEquivalent: ""
-        )
-        togglePin.target = self
-        menu.addItem(togglePin)
+        togglePinItem.target = self
+        menu.addItem(togglePinItem)
 
         let quit = NSMenuItem(
             title: "退出悬浮工作台",
@@ -43,11 +44,16 @@ public final class MenuBarController: NSObject {
         )
         quit.target = NSApplication.shared
         menu.addItem(quit)
+        menu.delegate = self
         statusItem.menu = menu
     }
 
     deinit {
         NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        togglePinItem.state = windowController.isPinned ? .on : .off
     }
 
     @objc private func showHidePanel() {

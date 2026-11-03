@@ -12,7 +12,10 @@ public final class TimerSaveScheduler: SaveScheduling {
     public init() {}
     public func schedule(after delay: TimeInterval, action: @escaping () -> Void) {
         cancel()
-        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in action() }
+        // Common modes keep autosave running during menu tracking, scrolling and live resize.
+        let timer = Timer(timeInterval: delay, repeats: false) { _ in action() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
     public func cancel() {
         timer?.invalidate()

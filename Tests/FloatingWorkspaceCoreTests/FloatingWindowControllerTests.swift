@@ -91,6 +91,73 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(controller.panel.frame.height, controller.panel.minSize.height)
     }
 
+    func testFirstLaunchWithoutSavedFrameCentersPanelOnVisibleScreen() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+
+        let visible = try XCTUnwrap((controller.panel.screen ?? NSScreen.main)?.visibleFrame)
+        XCTAssertEqual(controller.panel.frame.midX, visible.midX, accuracy: 1)
+        XCTAssertTrue(visible.contains(controller.panel.frame))
+        XCTAssertTrue(hasUsableTitlebar(controller.panel))
+    }
+
+    func testSavedFrameWithTinyScreenOverlapFallsBackToUsableTitlebar() throws {
+        let rightmost = try XCTUnwrap(NSScreen.screens.max { $0.frame.maxX < $1.frame.maxX })
+        let visible = rightmost.visibleFrame
+        let savedFrame = NSRect(x: visible.maxX - 1, y: visible.maxY - 700, width: 640, height: 700)
+        UserDefaults.standard.set(
+            "\(Int(savedFrame.minX)) \(Int(savedFrame.minY)) 640 700 0 0 1512 949 ",
+            forKey: "NSWindow Frame FloatingWorkspaceFrame"
+        )
+
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+
+        XCTAssertNotEqual(controller.panel.frame, savedFrame)
+        XCTAssertTrue(hasUsableTitlebar(controller.panel))
+    }
+
+    func testOversizedBlankResizeKeepsTitlebarOnVisibleScreen() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+        let visible = try XCTUnwrap((controller.panel.screen ?? NSScreen.main)?.visibleFrame)
+
+        controller.setBlankSize(width: 500, height: visible.height + 2000)
+
+        XCTAssertTrue(visible.contains(controller.panel.frame))
+        XCTAssertTrue(hasUsableTitlebar(controller.panel))
+        XCTAssertEqual(controller.panel.frame.width, 500)
+    }
+
+    func testTitlebarPinButtonShowsStateAndTogglesSharedPin() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+        let accessory = try XCTUnwrap(controller.panel.titlebarAccessoryViewControllers.first)
+        let button = controller.pinButton
+
+        XCTAssertTrue(button.isDescendant(of: accessory.view))
+        XCTAssertEqual(button.accessibilityIdentifier(), "title-pin")
+        XCTAssertEqual(button.state, .on)
+        XCTAssertEqual(button.title, "已置顶")
+
+        button.performClick(nil)
+        XCTAssertFalse(doubles.store.content.isPinned)
+        XCTAssertEqual(controller.panel.level, .normal)
+        XCTAssertEqual(button.state, .off)
+        XCTAssertEqual(button.title, "未置顶")
+
+        controller.togglePinned()
+        XCTAssertTrue(controller.isPinned)
+        XCTAssertEqual(button.state, .on)
+        XCTAssertEqual(button.title, "已置顶")
+
+        button.performClick(nil)
+        XCTAssertFalse(controller.isPinned)
+        button.performClick(nil)
+        XCTAssertTrue(controller.isPinned)
+        XCTAssertEqual(controller.panel.level, .floating)
+    }
+
     func testPinningUpdatesStoreAndPanelLevel() throws {
         let doubles = try ContentStoreTestDoubles()
         let controller = FloatingWindowController(store: doubles.store)
@@ -138,5 +205,20 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertTrue(controller.panel.isVisible)
         controller.hide()
         XCTAssertFalse(controller.panel.isVisible)
+    }
+
+    private func hasUsableTitlebar(_ panel: NSPanel) -> Bool {
+        let frame = panel.frame
+        let titlebarHeight = frame.height - panel.contentRect(forFrameRect: frame).height
+        let titlebar = NSRect(
+            x: frame.minX,
+            y: frame.maxY - titlebarHeight,
+            width: frame.width,
+            height: titlebarHeight
+        )
+        return NSScreen.screens.contains {
+            let overlap = $0.visibleFrame.intersection(titlebar)
+            return overlap.width >= 40 && overlap.height >= 20
+        }
     }
 }

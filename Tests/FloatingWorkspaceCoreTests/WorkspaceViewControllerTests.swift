@@ -112,6 +112,39 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.window.panel.frame.size, NSSize(width: 640, height: 700))
     }
 
+    func testProgrammaticPanelResizeUpdatesBothBlankSizeFields() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.blank)
+
+        fixture.window.panel.setFrame(NSRect(x: 100, y: 100, width: 700, height: 600), display: false)
+
+        XCTAssertEqual(fixture.workspace.widthField.stringValue, "700")
+        XCTAssertEqual(fixture.workspace.heightField.stringValue, "600")
+    }
+
+    func testClampedBlankWidthIsWrittenBackToField() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.widthField.stringValue = "100"
+        fixture.workspace.heightField.stringValue = "600"
+
+        fixture.workspace.blankSizeChanged()
+
+        XCTAssertEqual(fixture.window.panel.frame.size, NSSize(width: 360, height: 600))
+        XCTAssertEqual(fixture.workspace.widthField.stringValue, "360")
+        XCTAssertEqual(fixture.workspace.heightField.stringValue, "600")
+    }
+
+    func testEditingWidthAfterResizeKeepsCurrentHeight() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.blank)
+        fixture.window.panel.setFrame(NSRect(x: 100, y: 100, width: 700, height: 600), display: false)
+
+        fixture.workspace.widthField.stringValue = "800"
+        fixture.workspace.blankSizeChanged()
+
+        XCTAssertEqual(fixture.window.panel.frame.size, NSSize(width: 800, height: 600))
+    }
+
     func testSaveStateLabelMapsSavedSavingAndFailedStates() throws {
         let fixture = try makeWorkspace()
         XCTAssertEqual(fixture.workspace.saveStateLabel.stringValue, "已保存")

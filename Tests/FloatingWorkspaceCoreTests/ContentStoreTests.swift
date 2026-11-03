@@ -40,6 +40,44 @@ final class ContentStoreTests: XCTestCase {
         }
     }
 
+    func testDisabledPersistedModesOpenAsNoteWithoutSaving() throws {
+        for mode in [WorkspaceMode.image, .web] {
+            var persisted = WorkspaceContent.default
+            persisted.selectedMode = mode
+            persisted.noteText = "保留正文"
+            let scheduler = ManualSaveScheduler()
+            let saver = ControlledWorkspaceSaver()
+
+            let store = try ContentStore(
+                loader: FakeWorkspaceLoader(content: persisted),
+                scheduler: scheduler,
+                saver: saver
+            )
+
+            XCTAssertEqual(store.content.selectedMode, .note)
+            XCTAssertEqual(store.content.noteText, "保留正文")
+            XCTAssertFalse(store.isDirty)
+            XCTAssertTrue(scheduler.delays.isEmpty)
+            XCTAssertTrue(saver.snapshots.isEmpty)
+        }
+    }
+
+    func testDisabledPersistedModeLeavesStoredFileUntouchedUntilNextSave() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("workspace-v1.json")
+        var persisted = WorkspaceContent.default
+        persisted.selectedMode = .web
+        try WorkspaceFileStore(fileURL: file).save(persisted)
+        let original = try Data(contentsOf: file)
+
+        let store = try ContentStore(fileURL: file)
+
+        XCTAssertEqual(store.content.selectedMode, .note)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+    }
+
     func testFlushOnCleanStoreCompletesWithoutSaving() throws {
         let doubles = try ContentStoreTestDoubles()
         let expectation = expectation(description: "clean flush")

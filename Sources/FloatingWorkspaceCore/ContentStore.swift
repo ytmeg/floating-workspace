@@ -29,7 +29,12 @@ public final class ContentStore: ObservableObject {
         saver: any WorkspaceSaving
     ) throws {
         let result = try loader.load()
-        content = result.content
+        var loaded = result.content
+        // Image and web are not available yet; the stored file keeps its mode until the next save.
+        if !loaded.selectedMode.isEnabledInPhase1 {
+            loaded.selectedMode = .note
+        }
+        content = loaded
         recoveryURL = result.recoveryURL
         self.scheduler = scheduler
         self.saver = saver

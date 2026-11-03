@@ -24,9 +24,16 @@ public struct WorkspaceFileStore: WorkspacePersisting {
             let content = try JSONDecoder().decode(WorkspaceContent.self, from: data)
             return WorkspaceLoadResult(content: content, recoveryURL: nil)
         } catch {
-            let stamp = ISO8601DateFormatter().string(from: now()).replacingOccurrences(of: ":", with: "-")
-            let backup = fileURL.deletingLastPathComponent()
-                .appendingPathComponent("workspace-v1.corrupt-\(stamp).json")
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let stamp = formatter.string(from: now()).replacingOccurrences(of: ":", with: "-")
+            let directory = fileURL.deletingLastPathComponent()
+            var backup = directory.appendingPathComponent("workspace-v1.corrupt-\(stamp).json")
+            var counter = 2
+            while FileManager.default.fileExists(atPath: backup.path) {
+                backup = directory.appendingPathComponent("workspace-v1.corrupt-\(stamp)-\(counter).json")
+                counter += 1
+            }
             try FileManager.default.moveItem(at: fileURL, to: backup)
             return WorkspaceLoadResult(content: .default, recoveryURL: backup)
         }

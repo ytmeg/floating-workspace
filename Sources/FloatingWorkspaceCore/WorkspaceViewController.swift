@@ -49,6 +49,13 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         store.$saveState.sink { [weak self] state in
             self?.apply(state)
         }.store(in: &subscriptions)
+        // Filtering by object here would make the publisher retain the panel that owns this controller.
+        NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)
+            .sink { [weak self] notification in
+                guard let self, notification.object as? NSPanel === self.windowController?.panel else { return }
+                self.updateBlankSizeFields()
+            }
+            .store(in: &subscriptions)
     }
 
     func selectMode(_ mode: WorkspaceMode) {
@@ -83,6 +90,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
             let height = Double(heightField.stringValue)
         else { return }
         windowController?.setBlankSize(width: width, height: height)
+        updateBlankSizeFields()
     }
 
     private func buildLeftRail() {

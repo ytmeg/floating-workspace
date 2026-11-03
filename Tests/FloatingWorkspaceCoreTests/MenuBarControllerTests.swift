@@ -34,6 +34,23 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertEqual(fixture.window.panel.level, .floating)
     }
 
+    func testPinMenuItemStateRefreshesFromPinnedStateOnMenuUpdate() throws {
+        let fixture = try makeFixture()
+        let menu = try XCTUnwrap(fixture.menu.statusItem.menu)
+        let delegate = try XCTUnwrap(menu.delegate)
+
+        delegate.menuNeedsUpdate?(menu)
+        XCTAssertEqual(menu.items[1].state, .on)
+
+        fixture.window.setPinned(false)
+        delegate.menuNeedsUpdate?(menu)
+        XCTAssertEqual(menu.items[1].state, .off)
+
+        fixture.window.togglePinned()
+        delegate.menuNeedsUpdate?(menu)
+        XCTAssertEqual(menu.items[1].state, .on)
+    }
+
     func testQuitMenuActionRoutesThroughApplicationTermination() throws {
         let fixture = try makeFixture()
         let menu = try XCTUnwrap(fixture.menu.statusItem.menu)

@@ -42,6 +42,25 @@ final class WorkspaceFileStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
 
+    func testTwoCorruptLoadsAtSameTimestampPreserveBothOriginals() throws {
+        let file = try temporaryDirectory().appendingPathComponent("workspace-v1.json")
+        let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = WorkspaceFileStore(fileURL: file, now: { fixedDate })
+        let first = Data("first-corrupt".utf8)
+        let second = Data("second-corrupt".utf8)
+
+        try first.write(to: file)
+        let firstBackup = try XCTUnwrap(try store.load().recoveryURL)
+        try second.write(to: file)
+        let secondBackup = try XCTUnwrap(try store.load().recoveryURL)
+
+        XCTAssertNotEqual(firstBackup, secondBackup)
+        XCTAssertTrue(secondBackup.lastPathComponent.hasPrefix("workspace-v1.corrupt-"))
+        XCTAssertEqual(try Data(contentsOf: firstBackup), first)
+        XCTAssertEqual(try Data(contentsOf: secondBackup), second)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
     func testImageAndWebAreNotEnabledInPhaseOne() {
         XCTAssertTrue(WorkspaceMode.note.isEnabledInPhase1)
         XCTAssertTrue(WorkspaceMode.blank.isEnabledInPhase1)
