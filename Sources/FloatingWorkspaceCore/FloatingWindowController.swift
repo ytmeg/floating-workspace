@@ -23,11 +23,16 @@ public final class FloatingWindowController: NSObject {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.minSize = NSSize(width: 360, height: 320)
-        panel.setFrameAutosaveName("FloatingWorkspaceFrame")
 
         let workspace = WorkspaceViewController(store: store, windowController: self)
         workspaceViewController = workspace
         panel.contentViewController = workspace
+        let frameAutosaveName: NSWindow.FrameAutosaveName = "FloatingWorkspaceFrame"
+        panel.setFrameAutosaveName(frameAutosaveName)
+        if let savedFrame = UserDefaults.standard.string(forKey: "NSWindow Frame \(frameAutosaveName)") {
+            panel.setFrame(NSRectFromString(savedFrame), display: false)
+        }
+        workspace.updateBlankSizeFields()
 
         contentSubscription = store.$content.sink { [weak self] content in
             self?.apply(content)

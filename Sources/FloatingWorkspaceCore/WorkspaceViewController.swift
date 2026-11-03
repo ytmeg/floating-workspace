@@ -296,7 +296,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         }
     }
 
-    private func updateBlankSizeFields() {
+    func updateBlankSizeFields() {
         guard let panel = windowController?.panel else { return }
         widthField.stringValue = String(Int(panel.frame.width.rounded()))
         heightField.stringValue = String(Int(panel.frame.height.rounded()))

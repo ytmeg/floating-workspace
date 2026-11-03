@@ -31,6 +31,43 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.panel.backgroundColor, .windowBackgroundColor)
     }
 
+    func testSavedFrameIsRestoredAfterWorkspaceContentInstallation() throws {
+        let savedFrame = NSRect(x: 100, y: 160, width: 640, height: 700)
+        let saver = NSWindow(
+            contentRect: savedFrame,
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        saver.setFrame(savedFrame, display: false)
+        saver.saveFrame(usingName: "FloatingWorkspaceFrame")
+
+        let doubles = try ContentStoreTestDoubles()
+        let controller = FloatingWindowController(store: doubles.store)
+
+        XCTAssertEqual(controller.panel.frame, savedFrame)
+    }
+
+    func testSavedBlankFrameUpdatesSizeFieldsAfterRestore() throws {
+        let savedFrame = NSRect(x: 100, y: 160, width: 640, height: 700)
+        let saver = NSWindow(
+            contentRect: savedFrame,
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        saver.setFrame(savedFrame, display: false)
+        saver.saveFrame(usingName: "FloatingWorkspaceFrame")
+
+        let doubles = try ContentStoreTestDoubles()
+        doubles.store.update { $0.selectedMode = .blank }
+        let controller = FloatingWindowController(store: doubles.store)
+        let workspace = try XCTUnwrap(controller.panel.contentViewController as? WorkspaceViewController)
+
+        XCTAssertEqual(workspace.widthField.stringValue, "640")
+        XCTAssertEqual(workspace.heightField.stringValue, "700")
+    }
+
     func testPinningUpdatesStoreAndPanelLevel() throws {
         let doubles = try ContentStoreTestDoubles()
         let controller = FloatingWindowController(store: doubles.store)
