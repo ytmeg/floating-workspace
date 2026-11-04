@@ -72,6 +72,27 @@ final class IconResourceTests: XCTestCase {
         }
     }
 
+    func testAppIconUsesApprovedFloatingBadgeColorsAtSVGCoordinates() throws {
+        let cases = [
+            (dark: false, badge: (red: 0xFF, green: 0xFF, blue: 0xFF), pin: (red: 0x77, green: 0x67, blue: 0xC8)),
+            (dark: true, badge: (red: 0x8B, green: 0xD0, blue: 0xFF), pin: (red: 0x14, green: 0x22, blue: 0x35)),
+        ]
+        for testCase in cases {
+            let filename = "AppIcon\(testCase.dark ? "-Dark" : "")-1024.png"
+            let image = try loadImage(at: appIconURL.appendingPathComponent(filename))
+            let badge = try colorAtSVGPoint(x: 52.5, y: 45.5, image: image)
+            XCTAssertEqual(badge.red, testCase.badge.red, "\(filename) badge red")
+            XCTAssertEqual(badge.green, testCase.badge.green, "\(filename) badge green")
+            XCTAssertEqual(badge.blue, testCase.badge.blue, "\(filename) badge blue")
+
+            // SVG translate(-1 -1) scale(.85) maps the pin's (45, 42) to (37.25, 34.7).
+            let pin = try colorAtSVGPoint(x: 37.5, y: 34.5, image: image)
+            XCTAssertEqual(pin.red, testCase.pin.red, "\(filename) pin red")
+            XCTAssertEqual(pin.green, testCase.pin.green, "\(filename) pin green")
+            XCTAssertEqual(pin.blue, testCase.pin.blue, "\(filename) pin blue")
+        }
+    }
+
     func testMenuTemplateIsBlackAlphaAndUsesTemplateRenderingIntent() throws {
         let menuURL = catalogURL.appendingPathComponent("MenuBarTemplate.imageset")
         let manifest = try jsonObject(at: menuURL.appendingPathComponent("Contents.json"))
@@ -154,6 +175,15 @@ final class IconResourceTests: XCTestCase {
         return appearances.contains(where: {
             $0["appearance"] == "luminosity" && $0["value"] == "dark"
         })
+    }
+
+    private func colorAtSVGPoint(x: CGFloat, y: CGFloat, image: CGImage) throws -> (red: Int, green: Int, blue: Int) {
+        let pixels = try rgbaPixels(from: image)
+        let scale = CGFloat(image.width) / 64
+        let column = Int(x * scale)
+        let rowFromTop = Int(y * scale)
+        let index = (rowFromTop * image.width + column) * 4
+        return (Int(pixels[index]), Int(pixels[index + 1]), Int(pixels[index + 2]))
     }
 
     private func loadImage(at url: URL) throws -> CGImage {

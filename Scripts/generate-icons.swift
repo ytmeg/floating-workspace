@@ -15,7 +15,8 @@ private enum GeneratorError: Error {
     case cannotWriteImage
 }
 
-private let canvas: CGFloat = 1024
+// The approved floating-badge SVG uses a 64 × 64 viewBox with a top-left origin.
+private let canvas: CGFloat = 64
 private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 private let entries = [
     IconEntry(size: "16x16", scale: "1x", pixels: 16),
@@ -55,6 +56,8 @@ private func makeContext(pixels: Int) throws -> CGContext {
         throw GeneratorError.cannotCreateContext
     }
     context.scaleBy(x: CGFloat(pixels) / canvas, y: CGFloat(pixels) / canvas)
+    context.translateBy(x: 0, y: canvas)
+    context.scaleBy(x: 1, y: -1)
     return context
 }
 
@@ -62,92 +65,122 @@ private func roundedPath(_ rect: CGRect, radius: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 }
 
-private func drawPin(in context: CGContext, center: CGPoint) {
-    context.saveGState()
-    context.translateBy(x: center.x, y: center.y)
-    context.rotate(by: -.pi / 6)
-    context.addPath(roundedPath(CGRect(x: -58, y: 20, width: 116, height: 64), radius: 18))
-    context.fillPath()
-    context.move(to: CGPoint(x: -36, y: 20))
-    context.addLine(to: CGPoint(x: 36, y: 20))
-    context.addLine(to: CGPoint(x: 20, y: -22))
-    context.addLine(to: CGPoint(x: -20, y: -22))
-    context.closePath()
-    context.fillPath()
-    context.move(to: CGPoint(x: -12, y: -22))
-    context.addLine(to: CGPoint(x: 12, y: -22))
-    context.addLine(to: CGPoint(x: 0, y: -86))
-    context.closePath()
-    context.fillPath()
-    context.restoreGState()
-}
-
-private func drawAppIcon(in context: CGContext, dark: Bool) {
-    let background = CGRect(x: 32, y: 32, width: 960, height: 960)
-    let backgroundPath = roundedPath(background, radius: 220)
+private func drawBackground(in context: CGContext, dark: Bool) {
+    // Normalize the mockup's 82 pt card and 22 pt radius to the SVG viewBox.
+    let backgroundPath = roundedPath(CGRect(x: 0, y: 0, width: 64, height: 64), radius: 22 * 64 / 82)
     let gradientColors = dark
-        ? [color(0x121926), color(0x20344A)] as CFArray
-        : [color(0xE0F4FF), color(0xEEE4FF)] as CFArray
+        ? [color(0x536887), color(0x0C1420)] as CFArray
+        : [color(0x9DE0FF), color(0xA48BEB)] as CFArray
     let locations: [CGFloat] = [0, 1]
     let gradient = CGGradient(colorsSpace: colorSpace, colors: gradientColors, locations: locations)!
+    let angle = 145 * CGFloat.pi / 180
+    let direction = CGPoint(x: sin(angle), y: -cos(angle))
+    let length = 64 * (abs(direction.x) + abs(direction.y))
+    let center = CGPoint(x: 32, y: 32)
+    let start = CGPoint(x: center.x - direction.x * length / 2, y: center.y - direction.y * length / 2)
+    let end = CGPoint(x: center.x + direction.x * length / 2, y: center.y + direction.y * length / 2)
 
     context.saveGState()
     context.addPath(backgroundPath)
     context.clip()
     context.drawLinearGradient(
         gradient,
-        start: CGPoint(x: 128, y: 896),
-        end: CGPoint(x: 896, y: 128),
+        start: start,
+        end: end,
         options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
     )
     context.restoreGState()
 
-    context.setStrokeColor(dark ? color(0x8BD0FF, 0.38) : color(0xFFFFFF, 0.82))
-    context.setLineWidth(8)
+    context.setStrokeColor(color(0xFFFFFF, dark ? 0.20 : 0.65))
+    context.setLineWidth(64 / 82)
     context.addPath(backgroundPath)
     context.strokePath()
+}
 
-    let backPane = CGRect(x: 192, y: 352, width: 560, height: 416)
-    context.setFillColor(color(0x8BD0FF, dark ? 0.52 : 0.68))
-    context.addPath(roundedPath(backPane, radius: 88))
+private func drawPin(in context: CGContext) {
+    context.saveGState()
+    context.translateBy(x: -1, y: -1)
+    context.scaleBy(x: 0.85, y: 0.85)
+    context.move(to: CGPoint(x: 42, y: 38))
+    context.addLine(to: CGPoint(x: 49, y: 38))
+    context.addLine(to: CGPoint(x: 48, y: 43))
+    context.addLine(to: CGPoint(x: 51, y: 45))
+    context.addLine(to: CGPoint(x: 51, y: 47))
+    context.addLine(to: CGPoint(x: 47, y: 47))
+    context.addLine(to: CGPoint(x: 47, y: 53))
+    context.addLine(to: CGPoint(x: 46, y: 54))
+    context.addLine(to: CGPoint(x: 45, y: 53))
+    context.addLine(to: CGPoint(x: 45, y: 47))
+    context.addLine(to: CGPoint(x: 41, y: 47))
+    context.addLine(to: CGPoint(x: 41, y: 45))
+    context.addLine(to: CGPoint(x: 44, y: 43))
+    context.addLine(to: CGPoint(x: 43, y: 38))
+    context.closePath()
+    context.fillPath()
+    context.restoreGState()
+}
+
+private func drawPane(
+    in context: CGContext,
+    rect: CGRect,
+    angle: CGFloat,
+    center: CGPoint
+) {
+    context.saveGState()
+    context.translateBy(x: center.x, y: center.y)
+    context.rotate(by: angle * .pi / 180)
+    context.translateBy(x: -center.x, y: -center.y)
+    context.addPath(roundedPath(rect, radius: 8))
+    context.fillPath()
+    context.restoreGState()
+}
+
+private func drawFloatingBadge(in context: CGContext, dark: Bool, isTemplate: Bool) {
+    let backColor = isTemplate
+        ? color(0x000000, 0.25)
+        : dark ? color(0x8BD0FF, 0.12) : color(0xFFFFFF, 0.25)
+    context.setFillColor(backColor)
+    drawPane(
+        in: context,
+        rect: CGRect(x: 12, y: 14, width: 30, height: 30),
+        angle: -8,
+        center: CGPoint(x: 27, y: 29)
+    )
+
+    let frontColor = isTemplate
+        ? color(0x000000, 0.45)
+        : dark ? color(0x8BD0FF, 0.24) : color(0xFFFFFF, 0.45)
+    context.setFillColor(frontColor)
+    drawPane(
+        in: context,
+        rect: CGRect(x: 22, y: 20, width: 30, height: 30),
+        angle: 8,
+        center: CGPoint(x: 37, y: 35)
+    )
+
+    let badgeColor = isTemplate ? color(0x000000) : dark ? color(0x8BD0FF) : color(0xFFFFFF)
+    context.setFillColor(badgeColor)
+    context.addEllipse(in: CGRect(x: 33, y: 33, width: 24, height: 24))
     context.fillPath()
 
-    let frontPane = CGRect(x: 264, y: 224, width: 560, height: 416)
-    context.setFillColor(dark ? color(0x26364A, 0.98) : color(0xFFFFFF, 0.94))
-    context.addPath(roundedPath(frontPane, radius: 88))
-    context.fillPath()
-    context.setStrokeColor(dark ? color(0x8BD0FF, 0.72) : color(0xFFFFFF, 0.96))
-    context.setLineWidth(8)
-    context.addPath(roundedPath(frontPane, radius: 88))
-    context.strokePath()
+    if isTemplate {
+        context.saveGState()
+        context.setBlendMode(.clear)
+        drawPin(in: context)
+        context.restoreGState()
+    } else {
+        context.setFillColor(dark ? color(0x142235) : color(0x7767C8))
+        drawPin(in: context)
+    }
+}
 
-    let badgeCenter = CGPoint(x: 724, y: 676)
-    context.setFillColor(color(0x8BD0FF))
-    context.addEllipse(in: CGRect(x: 592, y: 544, width: 264, height: 264))
-    context.fillPath()
-    context.setStrokeColor(dark ? color(0x121926, 0.72) : color(0xFFFFFF, 0.9))
-    context.setLineWidth(10)
-    context.addEllipse(in: CGRect(x: 592, y: 544, width: 264, height: 264))
-    context.strokePath()
-    context.setFillColor(color(0x121926))
-    drawPin(in: context, center: badgeCenter)
+private func drawAppIcon(in context: CGContext, dark: Bool) {
+    drawBackground(in: context, dark: dark)
+    drawFloatingBadge(in: context, dark: dark, isTemplate: false)
 }
 
 private func drawMenuTemplate(in context: CGContext) {
-    context.setStrokeColor(color(0x000000))
-    context.setFillColor(color(0x000000))
-    context.setLineWidth(58)
-    context.addPath(roundedPath(CGRect(x: 192, y: 352, width: 560, height: 416), radius: 88))
-    context.strokePath()
-    context.addPath(roundedPath(CGRect(x: 264, y: 224, width: 560, height: 416), radius: 88))
-    context.strokePath()
-
-    context.addEllipse(in: CGRect(x: 592, y: 544, width: 264, height: 264))
-    context.fillPath()
-    context.saveGState()
-    context.setBlendMode(.clear)
-    drawPin(in: context, center: CGPoint(x: 724, y: 676))
-    context.restoreGState()
+    drawFloatingBadge(in: context, dark: false, isTemplate: true)
 }
 
 private func writePNG(_ context: CGContext, to url: URL) throws {
