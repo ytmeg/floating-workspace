@@ -3,6 +3,16 @@ import Combine
 import Foundation
 
 @MainActor
+private final class WorkspaceRootView: NSView {
+    var appearanceChanged: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        appearanceChanged?()
+    }
+}
+
+@MainActor
 public final class WorkspaceViewController: NSViewController, NSTextViewDelegate {
     let noteButton = NSButton()
     let imageButton = NSButton()
@@ -18,6 +28,8 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     let modeContainer = NSView()
     let noteScrollView = NSScrollView()
     let blankContainer = NSView()
+    let statusBar = NSView()
+    let glassBackgroundView = GlassBackgroundView()
 
     let store: ContentStore
     private weak var windowController: FloatingWindowController?
@@ -35,7 +47,21 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     }
 
     public override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 540))
+        let rootView = WorkspaceRootView(frame: NSRect(x: 0, y: 0, width: 520, height: 540))
+        rootView.appearanceChanged = { [weak self] in
+            self?.updateGlassAppearance()
+        }
+        view = rootView
+
+        glassBackgroundView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(glassBackgroundView)
+        NSLayoutConstraint.activate([
+            glassBackgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            glassBackgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            glassBackgroundView.topAnchor.constraint(equalTo: view.topAnchor),
+            glassBackgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
         buildLeftRail()
         buildModeContainer()
         buildStatusBar()
@@ -94,13 +120,14 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     }
 
     private func buildLeftRail() {
+        leftRail.wantsLayer = true
         leftRail.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(leftRail)
 
-        configureModeButton(noteButton, title: "便签", identifier: "mode-note", action: #selector(noteModeSelected))
-        configureModeButton(imageButton, title: "图片", identifier: "mode-image", action: #selector(imageModeSelected))
-        configureModeButton(webButton, title: "网页", identifier: "mode-web", action: #selector(webModeSelected))
-        configureModeButton(blankButton, title: "空白", identifier: "mode-blank", action: #selector(blankModeSelected))
+        configureModeButton(noteButton, title: "便签", symbolName: "note.text", identifier: "mode-note", action: #selector(noteModeSelected))
+        configureModeButton(imageButton, title: "图片", symbolName: "photo", identifier: "mode-image", action: #selector(imageModeSelected))
+        configureModeButton(webButton, title: "网页", symbolName: "globe", identifier: "mode-web", action: #selector(webModeSelected))
+        configureModeButton(blankButton, title: "空白", symbolName: "square", identifier: "mode-blank", action: #selector(blankModeSelected))
         imageButton.isEnabled = false
         webButton.isEnabled = false
 
@@ -209,7 +236,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     }
 
     private func buildStatusBar() {
-        let statusBar = NSView()
+        statusBar.wantsLayer = true
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusBar)
 
@@ -244,10 +271,13 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     private func configureModeButton(
         _ button: NSButton,
         title: String,
+        symbolName: String,
         identifier: String,
         action: Selector
     ) {
         button.title = title
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+        button.imagePosition = .imageLeading
         button.isBordered = true
         button.bezelStyle = .rounded
         button.controlSize = .large
@@ -295,6 +325,43 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         if content.selectedMode == .blank {
             updateBlankSizeFields()
         }
+        updateGlassAppearance(content: content)
+    }
+
+    func updateGlassAppearance(content appliedContent: WorkspaceContent? = nil) {
+        let content = appliedContent ?? store.content
+        let palette = WorkspaceAppearance.current(appearance: view.effectiveAppearance)
+        let blankColor: NSColor?
+        if content.selectedMode == .blank {
+            let background = content.blankBackground
+            blankColor = NSColor(
+                srgbRed: background.red,
+                green: background.green,
+                blue: background.blue,
+                alpha: background.alpha
+            )
+        } else {
+            blankColor = nil
+        }
+        glassBackgroundView.apply(palette, blankColor: blankColor)
+
+        leftRail.layer?.backgroundColor = palette.railBackgroundColor.cgColor
+        statusBar.layer?.backgroundColor = palette.contentBackgroundColor.cgColor
+        noteScrollView.drawsBackground = true
+        noteScrollView.backgroundColor = palette.contentBackgroundColor
+        noteTextView.drawsBackground = true
+        noteTextView.backgroundColor = palette.contentBackgroundColor
+        noteTextView.textColor = .labelColor
+        noteTextView.insertionPointColor = palette.accentColor
+        blankTitleField.textColor = .labelColor
+        widthField.textColor = .labelColor
+        heightField.textColor = .labelColor
+        saveStateLabel.textColor = .labelColor
+
+        noteButton.contentTintColor = content.selectedMode == .note ? palette.accentColor : .labelColor
+        blankButton.contentTintColor = content.selectedMode == .blank ? palette.accentColor : .labelColor
+        imageButton.contentTintColor = .labelColor
+        webButton.contentTintColor = .labelColor
     }
 
     private func apply(_ state: SaveState) {

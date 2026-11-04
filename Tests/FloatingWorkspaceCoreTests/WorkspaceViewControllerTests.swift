@@ -38,6 +38,99 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.workspace.saveStateLabel.accessibilityIdentifier(), "save-state")
     }
 
+    func testGlassBackgroundIsBackmostAndUsesCurrentPalette() throws {
+        let fixture = try makeWorkspace()
+        let glassViews = fixture.workspace.view.subviews.compactMap { $0 as? GlassBackgroundView }
+        let glass = try XCTUnwrap(glassViews.first)
+        let palette = WorkspaceAppearance.current(appearance: fixture.workspace.view.effectiveAppearance)
+        let statusBar = try XCTUnwrap(fixture.workspace.saveStateLabel.superview?.superview)
+
+        XCTAssertEqual(glassViews.count, 1)
+        XCTAssertTrue(fixture.workspace.view.subviews.first === glass)
+        fixture.workspace.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(glass.frame, fixture.workspace.view.bounds)
+        XCTAssertEqual(glass.gradientView.colors, palette.gradientColors)
+        XCTAssertEqual(fixture.workspace.noteScrollView.backgroundColor, palette.contentBackgroundColor)
+        XCTAssertEqual(fixture.workspace.noteTextView.backgroundColor, palette.contentBackgroundColor)
+        XCTAssertEqual(fixture.workspace.noteTextView.textColor, .labelColor)
+        XCTAssertEqual(fixture.workspace.leftRail.layer?.backgroundColor, palette.railBackgroundColor.cgColor)
+        XCTAssertEqual(statusBar.layer?.backgroundColor, palette.contentBackgroundColor.cgColor)
+    }
+
+    func testModeButtonsHaveSymbolsAndDynamicSelectionColors() throws {
+        let fixture = try makeWorkspace()
+        let buttons = [
+            fixture.workspace.noteButton,
+            fixture.workspace.imageButton,
+            fixture.workspace.webButton,
+            fixture.workspace.blankButton
+        ]
+        let palette = WorkspaceAppearance.current(appearance: fixture.workspace.view.effectiveAppearance)
+
+        XCTAssertEqual(buttons.map(\.title), ["便签", "图片", "网页", "空白"])
+        for button in buttons {
+            XCTAssertNotNil(button.image)
+            XCTAssertEqual(button.imagePosition, .imageLeading)
+        }
+        fixture.workspace.view.layoutSubtreeIfNeeded()
+        for button in buttons {
+            XCTAssertEqual(button.frame.height, 44, accuracy: 0.001)
+        }
+        XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
+        XCTAssertFalse(fixture.workspace.webButton.isEnabled)
+        XCTAssertEqual(fixture.workspace.noteButton.contentTintColor, palette.accentColor)
+        XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, .labelColor)
+
+        fixture.workspace.selectMode(.blank)
+
+        XCTAssertEqual(fixture.workspace.noteButton.contentTintColor, .labelColor)
+        XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, palette.accentColor)
+    }
+
+    func testAppearanceChangesRefreshPaletteWithoutChangingOrSavingContent() throws {
+        var initial = WorkspaceContent.default
+        initial.noteText = "保留正文"
+        initial.isPinned = true
+        let scheduler = ManualSaveScheduler()
+        let saver = ControlledWorkspaceSaver()
+        let store = try ContentStore(
+            loader: FakeWorkspaceLoader(content: initial),
+            scheduler: scheduler,
+            saver: saver
+        )
+        let window = FloatingWindowController(store: store)
+        let workspace = try XCTUnwrap(window.panel.contentViewController as? WorkspaceViewController)
+        let menu = MenuBarController(windowController: window)
+        let pinItem = try XCTUnwrap(menu.statusItem.menu?.items.first { $0.title == "切换置顶" })
+        let light = try XCTUnwrap(NSAppearance(named: .aqua))
+        let dark = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        for appearance in [light, dark] {
+            workspace.view.appearance = appearance
+            workspace.view.viewDidChangeEffectiveAppearance()
+
+            let glass = try XCTUnwrap(workspace.view.subviews.compactMap { $0 as? GlassBackgroundView }.first)
+            let palette = WorkspaceAppearance.current(appearance: workspace.view.effectiveAppearance)
+            XCTAssertEqual(glass.gradientView.colors, palette.gradientColors)
+            XCTAssertEqual(workspace.noteScrollView.backgroundColor, palette.contentBackgroundColor)
+            XCTAssertEqual(workspace.leftRail.layer?.backgroundColor, palette.railBackgroundColor.cgColor)
+            XCTAssertEqual(window.pinButton.state, .on)
+            XCTAssertEqual(window.pinButton.title, "已置顶")
+            menu.menuNeedsUpdate(try XCTUnwrap(menu.statusItem.menu))
+            XCTAssertEqual(pinItem.state, .on)
+            XCTAssertEqual(workspace.noteTextView.string, "保留正文")
+            XCTAssertEqual(store.content.selectedMode, .note)
+            workspace.selectMode(.image)
+            workspace.selectMode(.web)
+            XCTAssertEqual(store.content.selectedMode, .note)
+            XCTAssertTrue(store.content.isPinned)
+        }
+
+        XCTAssertFalse(store.isDirty)
+        XCTAssertTrue(scheduler.delays.isEmpty)
+        XCTAssertTrue(saver.snapshots.isEmpty)
+    }
+
     func testDisabledModesLeaveSelectionUnchanged() throws {
         let fixture = try makeWorkspace()
 

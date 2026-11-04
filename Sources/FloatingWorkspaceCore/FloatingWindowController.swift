@@ -25,6 +25,7 @@ public final class FloatingWindowController: NSObject {
 
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        panel.isOpaque = false
         panel.minSize = NSSize(width: 360, height: 320)
 
         let workspace = WorkspaceViewController(store: store, windowController: self)
@@ -137,7 +138,7 @@ public final class FloatingWindowController: NSObject {
         switch content.selectedMode {
         case .note:
             panel.title = "悬浮工作台"
-            panel.backgroundColor = .windowBackgroundColor
+            panel.backgroundColor = .clear
         case .blank:
             panel.title = content.blankTitle.isEmpty ? "悬浮工作台" : content.blankTitle
             let color = content.blankBackground

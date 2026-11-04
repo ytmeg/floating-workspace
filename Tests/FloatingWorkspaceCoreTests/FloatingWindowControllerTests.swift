@@ -28,7 +28,8 @@ final class FloatingWindowControllerTests: XCTestCase {
             NSSize(width: 520, height: 540)
         )
         XCTAssertEqual(controller.panel.title, "悬浮工作台")
-        XCTAssertEqual(controller.panel.backgroundColor, .windowBackgroundColor)
+        XCTAssertFalse(controller.panel.isOpaque)
+        XCTAssertEqual(controller.panel.backgroundColor, .clear)
     }
 
     func testSavedFrameIsRestoredAfterWorkspaceContentInstallation() throws {
@@ -180,18 +181,23 @@ final class FloatingWindowControllerTests: XCTestCase {
             $0.blankBackground = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
         }
         XCTAssertEqual(controller.panel.title, "自定义标题")
-        XCTAssertEqual(controller.panel.backgroundColor, NSColor(red: 1, green: 0, blue: 0, alpha: 1))
+        XCTAssertEqual(controller.panel.backgroundColor, NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
 
         doubles.store.update { $0.blankTitle = "" }
         XCTAssertEqual(controller.panel.title, "悬浮工作台")
+
+        doubles.store.update { $0.selectedMode = .note }
+        XCTAssertEqual(controller.panel.backgroundColor, .clear)
     }
 
     func testSetBlankSizeClampsEachDimensionToMinimum() throws {
         let doubles = try ContentStoreTestDoubles()
         let controller = FloatingWindowController(store: doubles.store)
+        let visibleHeight = try XCTUnwrap((controller.panel.screen ?? NSScreen.main)?.visibleFrame.height)
+        let requestedHeight = min(900, visibleHeight)
 
-        controller.setBlankSize(width: 100, height: 900)
-        XCTAssertEqual(controller.panel.frame.size, NSSize(width: 360, height: 900))
+        controller.setBlankSize(width: 100, height: requestedHeight)
+        XCTAssertEqual(controller.panel.frame.size, NSSize(width: 360, height: requestedHeight))
 
         controller.setBlankSize(width: 500, height: 100)
         XCTAssertEqual(controller.panel.frame.size, NSSize(width: 500, height: 320))
