@@ -71,6 +71,44 @@ final class GlassBackgroundViewTests: XCTestCase {
         try assertBackground(view, equals: .clear)
     }
 
+    func testApplyRendersPaletteBorderAndShadowOnBackgroundLayer() throws {
+        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let palette = try makePalette()
+
+        view.apply(palette)
+
+        let layer = try XCTUnwrap(view.layer)
+        XCTAssertGreaterThan(layer.borderWidth, 0)
+        XCTAssertEqual(layer.borderColor, palette.borderColor.cgColor)
+        XCTAssertGreaterThan(layer.shadowOpacity, 0)
+        XCTAssertGreaterThan(layer.shadowRadius, 0)
+        XCTAssertEqual(layer.shadowColor, palette.shadowColor.cgColor)
+    }
+
+    func testIncreasedContrastStrengthensRenderedBorder() throws {
+        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let normal = WorkspaceAppearance.make(
+            appearance: appearance,
+            reduceTransparency: false,
+            increaseContrast: false
+        )
+        let contrast = WorkspaceAppearance.make(
+            appearance: appearance,
+            reduceTransparency: false,
+            increaseContrast: true
+        )
+        view.apply(normal)
+        let normalBorder = try XCTUnwrap(view.layer?.borderColor)
+        let normalAlpha = try XCTUnwrap(NSColor(cgColor: normalBorder)).alphaComponent
+
+        view.apply(contrast)
+
+        let contrastBorder = try XCTUnwrap(view.layer?.borderColor)
+        XCTAssertEqual(contrastBorder, contrast.borderColor.cgColor)
+        XCTAssertGreaterThan(NSColor(cgColor: contrastBorder)?.alphaComponent ?? 0, normalAlpha)
+    }
+
     private func makePalette(reduceTransparency: Bool = false) throws -> WorkspacePalette {
         WorkspaceAppearance.make(
             appearance: try XCTUnwrap(NSAppearance(named: .aqua)),

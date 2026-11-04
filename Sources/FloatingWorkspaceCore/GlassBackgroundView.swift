@@ -41,6 +41,12 @@ final class GlassBackgroundView: NSView {
             backgroundColor = palette.solidBackgroundColor
         }
         layer?.backgroundColor = backgroundColor.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = palette.borderColor.cgColor
+        layer?.shadowColor = palette.shadowColor.cgColor
+        layer?.shadowOpacity = 1
+        layer?.shadowRadius = 12
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
