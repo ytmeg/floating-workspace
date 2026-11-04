@@ -16,10 +16,17 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         )
         super.init()
 
-        if let image = NSImage(
-            systemSymbolName: "rectangle.on.rectangle",
-            accessibilityDescription: "悬浮工作台"
-        ) {
+        let image: NSImage?
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            image = NSImage(named: "MenuBarTemplate")
+            image?.isTemplate = true
+        } else {
+            image = NSImage(
+                systemSymbolName: "rectangle.on.rectangle",
+                accessibilityDescription: "悬浮工作台"
+            )
+        }
+        if let image {
             statusItem.button?.image = image
         } else {
             statusItem.button?.title = "浮"
