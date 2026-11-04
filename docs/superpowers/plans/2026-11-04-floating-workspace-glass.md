@@ -164,14 +164,14 @@ Add tests that prove:
 - The workspace root contains a `GlassBackgroundView` behind other content.
 - The panel is non-opaque; note uses a clear panel background while blank still exposes the exact user sRGB background color.
 - Mode buttons have non-nil images and keep their Chinese titles; image/web remain disabled.
-- `viewDidChangeAppearance` refreshes the palette without calling the saver, marking dirty, or changing note/mode/pin state.
+- `viewDidChangeEffectiveAppearance` refreshes the palette without calling the saver, marking dirty, or changing note/mode/pin state.
 - The title-bar pin, menu checkmark, note text, and disabled-mode guard remain unchanged after light/dark changes.
 
 Run focused controller tests; expected missing glass/image behavior failures.
 
 - [ ] **Step 2: Integrate glass below the existing content**
 
-Install one `GlassBackgroundView` as the backmost subview with constraints to all root edges. Keep the existing `WorkspaceViewController` ownership. Set `panel.isOpaque = false`; note panel background is `.clear`, blank remains the exact user sRGB color. `WorkspaceViewController` owns `updateGlassAppearance()` and calls it from content application and `viewDidChangeAppearance`.
+Install one `GlassBackgroundView` as the backmost subview with constraints to all root edges. Keep the existing `WorkspaceViewController` ownership. Set `panel.isOpaque = false`; note panel background is `.clear`, blank remains the exact user sRGB color. `WorkspaceViewController` owns `updateGlassAppearance()` and calls it from content application and `viewDidChangeEffectiveAppearance`.
 
 Use `WorkspaceAppearance.current(appearance: view.effectiveAppearance)` and pass the blank color only in blank mode. Apply `contentBackgroundColor` to note/status/editor surfaces and `railBackgroundColor` to the left rail. Do not add a redraw or appearance polling timer.
 
