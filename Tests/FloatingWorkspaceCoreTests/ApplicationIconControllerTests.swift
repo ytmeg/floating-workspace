@@ -122,8 +122,10 @@ final class ApplicationIconControllerTests: XCTestCase {
         x: Double,
         y: Double
     ) -> [UInt8] {
-        let column = Int(x * Double(width) / 64)
-        let row = Int(y * Double(height) / 64)
+        let cardX = 1 + x * 60 / 64
+        let cardY = 1 + y * 60 / 64
+        let column = Int(cardX * Double(width) / 82)
+        let row = Int(cardY * Double(height) / 82)
         let index = (row * width + column) * 4
         return Array(pixels[index..<index + 3])
     }

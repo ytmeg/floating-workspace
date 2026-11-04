@@ -60,6 +60,83 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertTrue(quit.target === NSApp)
     }
 
+    func testPackagedMenuTemplateIsAccessible() throws {
+        let bundle = try makePackagedMenuBundle()
+        let doubles = try ContentStoreTestDoubles()
+        let window = FloatingWindowController(store: doubles.store)
+        let menu = MenuBarController(windowController: window, bundle: bundle)
+        let image = try XCTUnwrap(menu.statusItem.button?.image)
+
+        XCTAssertTrue(image.isTemplate)
+        XCTAssertEqual(image.accessibilityDescription, "悬浮工作台")
+        let expected = try XCTUnwrap(NSImage(
+            contentsOf: repositoryURL().appendingPathComponent("Resources/Assets.xcassets/MenuBarTemplate.imageset/MenuBarTemplate-32.png")
+        ))
+        XCTAssertEqual(normalizedMenuPixels(image), normalizedMenuPixels(expected))
+    }
+
+    private func makePackagedMenuBundle() throws -> Bundle {
+        if let packagedPath = ProcessInfo.processInfo.environment["FLOATING_WORKSPACE_MENU_TEST_BUNDLE"] {
+            return try XCTUnwrap(Bundle(url: URL(fileURLWithPath: packagedPath)))
+        }
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MenuBarControllerTests-\(UUID().uuidString).app")
+        let resourcesURL = bundleURL.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: bundleURL)
+        }
+        let info: NSDictionary = [
+            "CFBundleIdentifier": "local.floatingworkspace.menu-tests.\(UUID().uuidString)",
+            "CFBundlePackageType": "APPL",
+        ]
+        XCTAssertTrue(info.write(to: bundleURL.appendingPathComponent("Contents/Info.plist"), atomically: true))
+        try FileManager.default.copyItem(
+            at: repositoryURL().appendingPathComponent("Resources/Assets.xcassets/MenuBarTemplate.imageset/MenuBarTemplate-32.png"),
+            to: resourcesURL.appendingPathComponent("MenuBarTemplate.png")
+        )
+        return try XCTUnwrap(Bundle(url: bundleURL))
+    }
+
+    private func normalizedMenuPixels(_ image: NSImage) -> [UInt8]? {
+        let width = 32
+        let height = 32
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        return pixels.withUnsafeMutableBytes { buffer -> [UInt8]? in
+            guard let baseAddress = buffer.baseAddress,
+                  let context = CGContext(
+                    data: baseAddress,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: width * 4,
+                    space: colorSpace,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else { return nil }
+            let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = graphicsContext
+            image.draw(
+                in: CGRect(x: 0, y: 0, width: width, height: height),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: true,
+                hints: nil
+            )
+            NSGraphicsContext.restoreGraphicsState()
+            return Array(buffer)
+        }
+    }
+
+    private func repositoryURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     private func makeFixture() throws -> (
         doubles: ContentStoreTestDoubles,
         window: FloatingWindowController,

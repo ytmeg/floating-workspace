@@ -6,7 +6,7 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
     private let windowController: FloatingWindowController
     private let togglePinItem: NSMenuItem
 
-    public init(windowController: FloatingWindowController) {
+    public init(windowController: FloatingWindowController, bundle: Bundle = .main) {
         self.windowController = windowController
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         togglePinItem = NSMenuItem(
@@ -17,9 +17,10 @@ public final class MenuBarController: NSObject, NSMenuDelegate {
         super.init()
 
         let image: NSImage?
-        if Bundle.main.bundleURL.pathExtension == "app" {
-            image = NSImage(named: "MenuBarTemplate")
+        if bundle.bundleURL.pathExtension == "app" {
+            image = bundle.image(forResource: "MenuBarTemplate")
             image?.isTemplate = true
+            image?.accessibilityDescription = "悬浮工作台"
         } else {
             image = NSImage(
                 systemSymbolName: "rectangle.on.rectangle",

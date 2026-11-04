@@ -133,13 +133,15 @@ final class IconResourceTests: XCTestCase {
         let cases = [
             (x: 18.0, y: 21.0, alpha: 64),       // Back rect only: 0.25 alpha.
             (x: 48.0, y: 27.0, alpha: 115),      // Front rect only: 0.45 alpha.
-            (x: 35.0, y: 35.0, alpha: 150),      // Overlap: 1 - 0.75 × 0.55.
+            (x: 27.5, y: 27.5, alpha: 150),      // Overlap: 1 - 0.75 × 0.55.
             (x: 52.5, y: 45.5, alpha: 255),      // Opaque badge.
-            (x: 37.0, y: 33.0, alpha: 0),        // Interior of transformed pin cutout.
+            (x: 38.5, y: 33.0, alpha: 0),        // Interior of transformed pin cutout.
         ]
         for testCase in cases {
-            let column = Int(testCase.x * Double(image.width) / 64)
-            let row = Int(testCase.y * Double(image.height) / 64)
+            let cardX = 1 + testCase.x * 60 / 64
+            let cardY = 1 + testCase.y * 60 / 64
+            let column = Int(cardX * Double(image.width) / 82)
+            let row = Int(cardY * Double(image.height) / 82)
             let alpha = pixels[(row * image.width + column) * 4 + 3]
             XCTAssertEqual(Double(alpha), Double(testCase.alpha), accuracy: 2, "SVG point (\(testCase.x), \(testCase.y))")
         }
@@ -197,9 +199,11 @@ final class IconResourceTests: XCTestCase {
 
     private func colorAtSVGPoint(x: CGFloat, y: CGFloat, image: CGImage) throws -> (red: Int, green: Int, blue: Int) {
         let pixels = try rgbaPixels(from: image)
-        let scale = CGFloat(image.width) / 64
-        let column = Int(x * scale)
-        let rowFromTop = Int(y * scale)
+        let scale = CGFloat(image.width) / 82
+        let cardX = 1 + x * 60 / 64
+        let cardY = 1 + y * 60 / 64
+        let column = Int(cardX * scale)
+        let rowFromTop = Int(cardY * scale)
         let index = (rowFromTop * image.width + column) * 4
         return (Int(pixels[index]), Int(pixels[index + 1]), Int(pixels[index + 2]))
     }

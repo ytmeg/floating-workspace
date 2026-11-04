@@ -15,8 +15,8 @@ private enum GeneratorError: Error {
     case cannotWriteImage
 }
 
-// The approved floating-badge SVG uses a 64 × 64 viewBox with a top-left origin.
-private let canvas: CGFloat = 64
+// The approved card is 82 × 82; its SVG sits at (1,1) with a 60 × 60 viewport.
+private let canvas: CGFloat = 82
 private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 private let entries = [
     IconEntry(size: "16x16", scale: "1x", pixels: 16),
@@ -66,8 +66,8 @@ private func roundedPath(_ rect: CGRect, radius: CGFloat) -> CGPath {
 }
 
 private func drawBackground(in context: CGContext, dark: Bool) {
-    // Normalize the mockup's 82 pt card and 22 pt radius to the SVG viewBox.
-    let backgroundPath = roundedPath(CGRect(x: 0, y: 0, width: 64, height: 64), radius: 22 * 64 / 82)
+    // CSS border: 1px inside, centered on a path inset by half the stroke.
+    let backgroundPath = roundedPath(CGRect(x: 0.5, y: 0.5, width: 81, height: 81), radius: 21.5)
     let gradientColors = dark
         ? [color(0x536887), color(0x0C1420)] as CFArray
         : [color(0x9DE0FF), color(0xA48BEB)] as CFArray
@@ -75,8 +75,8 @@ private func drawBackground(in context: CGContext, dark: Bool) {
     let gradient = CGGradient(colorsSpace: colorSpace, colors: gradientColors, locations: locations)!
     let angle = 145 * CGFloat.pi / 180
     let direction = CGPoint(x: sin(angle), y: -cos(angle))
-    let length = 64 * (abs(direction.x) + abs(direction.y))
-    let center = CGPoint(x: 32, y: 32)
+    let length = 82 * (abs(direction.x) + abs(direction.y))
+    let center = CGPoint(x: 41, y: 41)
     let start = CGPoint(x: center.x - direction.x * length / 2, y: center.y - direction.y * length / 2)
     let end = CGPoint(x: center.x + direction.x * length / 2, y: center.y + direction.y * length / 2)
 
@@ -92,9 +92,21 @@ private func drawBackground(in context: CGContext, dark: Bool) {
     context.restoreGState()
 
     context.setStrokeColor(color(0xFFFFFF, dark ? 0.20 : 0.65))
-    context.setLineWidth(64 / 82)
+    context.setLineWidth(1)
     context.addPath(backgroundPath)
     context.strokePath()
+
+    // CSS inset 0 1px 0: a one-pixel highlight follows the top inner edge.
+    context.saveGState()
+    context.addPath(backgroundPath)
+    context.clip()
+    context.addRect(CGRect(x: 0, y: 0, width: 82, height: 2))
+    context.clip()
+    context.setStrokeColor(color(0xFFFFFF, dark ? 0.16 : 0.55))
+    context.setLineWidth(1)
+    context.addPath(roundedPath(CGRect(x: 0.5, y: 1.5, width: 81, height: 81), radius: 21.5))
+    context.strokePath()
+    context.restoreGState()
 }
 
 private func drawPin(in context: CGContext) {
@@ -176,11 +188,19 @@ private func drawFloatingBadge(in context: CGContext, dark: Bool, isTemplate: Bo
 
 private func drawAppIcon(in context: CGContext, dark: Bool) {
     drawBackground(in: context, dark: dark)
+    context.saveGState()
+    context.translateBy(x: 1, y: 1)
+    context.scaleBy(x: 60 / 64, y: 60 / 64)
     drawFloatingBadge(in: context, dark: dark, isTemplate: false)
+    context.restoreGState()
 }
 
 private func drawMenuTemplate(in context: CGContext) {
+    context.saveGState()
+    context.translateBy(x: 1, y: 1)
+    context.scaleBy(x: 60 / 64, y: 60 / 64)
     drawFloatingBadge(in: context, dark: false, isTemplate: true)
+    context.restoreGState()
 }
 
 private func writePNG(_ context: CGContext, to url: URL) throws {
