@@ -12,6 +12,9 @@ public struct WorkspacePalette {
 }
 
 public enum WorkspaceAppearance {
+    @MainActor public static var acceptanceReduceTransparency: Bool?
+    @MainActor public static var acceptanceIncreaseContrast: Bool?
+
     public static func make(
         appearance: NSAppearance,
         reduceTransparency: Bool,
@@ -53,8 +56,10 @@ public enum WorkspaceAppearance {
         let workspace = NSWorkspace.shared
         return make(
             appearance: appearance,
-            reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency,
-            increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast
+            reduceTransparency: acceptanceReduceTransparency
+                ?? workspace.accessibilityDisplayShouldReduceTransparency,
+            increaseContrast: acceptanceIncreaseContrast
+                ?? workspace.accessibilityDisplayShouldIncreaseContrast
         )
     }
 

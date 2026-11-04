@@ -10,6 +10,60 @@ final class AppDelegateTests: XCTestCase {
         _ = NSApplication.shared
     }
 
+    override func tearDown() {
+        NSApp.appearance = nil
+        WorkspaceAppearance.acceptanceReduceTransparency = nil
+        WorkspaceAppearance.acceptanceIncreaseContrast = nil
+        super.tearDown()
+    }
+
+    func testAcceptanceOverridesParseLightDarkAndAccessibilityFlags() throws {
+        AppDelegate.applyAcceptanceOverrides(environment: [
+            "FLOATING_WORKSPACE_APPEARANCE": "light",
+            "FLOATING_WORKSPACE_REDUCE_TRANSPARENCY": "1",
+            "FLOATING_WORKSPACE_INCREASE_CONTRAST": "1"
+        ])
+        XCTAssertEqual(NSApp.appearance?.name, .aqua)
+        XCTAssertEqual(WorkspaceAppearance.acceptanceReduceTransparency, true)
+        XCTAssertEqual(WorkspaceAppearance.acceptanceIncreaseContrast, true)
+
+        AppDelegate.applyAcceptanceOverrides(environment: [
+            "FLOATING_WORKSPACE_APPEARANCE": "dark"
+        ])
+        XCTAssertEqual(NSApp.appearance?.name, .darkAqua)
+        XCTAssertNil(WorkspaceAppearance.acceptanceReduceTransparency)
+        XCTAssertNil(WorkspaceAppearance.acceptanceIncreaseContrast)
+    }
+
+    func testInvalidAcceptanceOverridesFallBackToSystemSettings() {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        WorkspaceAppearance.acceptanceReduceTransparency = true
+        WorkspaceAppearance.acceptanceIncreaseContrast = true
+
+        AppDelegate.applyAcceptanceOverrides(environment: [
+            "FLOATING_WORKSPACE_APPEARANCE": "sepia",
+            "FLOATING_WORKSPACE_REDUCE_TRANSPARENCY": "true",
+            "FLOATING_WORKSPACE_INCREASE_CONTRAST": "0"
+        ])
+
+        XCTAssertNil(NSApp.appearance)
+        XCTAssertNil(WorkspaceAppearance.acceptanceReduceTransparency)
+        XCTAssertNil(WorkspaceAppearance.acceptanceIncreaseContrast)
+    }
+
+    func testAcceptanceAccessibilityOverridesDriveCurrentPalette() throws {
+        WorkspaceAppearance.acceptanceReduceTransparency = true
+        WorkspaceAppearance.acceptanceIncreaseContrast = true
+
+        let palette = WorkspaceAppearance.current(
+            appearance: try XCTUnwrap(NSAppearance(named: .aqua))
+        )
+
+        XCTAssertFalse(palette.usesTransparency)
+        XCTAssertTrue(palette.gradientColors.isEmpty)
+        XCTAssertEqual(palette.borderColor.alphaComponent, 0.90, accuracy: 0.001)
+    }
+
     func testCleanStoreTerminatesImmediately() throws {
         let fixture = try makeFixture()
         let delegate = AppDelegate()

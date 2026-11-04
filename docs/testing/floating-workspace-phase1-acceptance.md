@@ -17,7 +17,8 @@
    ```
 
 3. 除默认启动冒烟外，每个用例设置独立的 `FLOATING_WORKSPACE_STORE_URL`，避免改写真实工作区。完整文件 URL 和 POSIX 路径均可。同时运行的实例不得共用同一数据文件，否则会互相覆盖。
-4. `FLOATING_WORKSPACE_STORE_URL` 不隔离窗口 frame。frame 保存在 UserDefaults 域 `local.floatingworkspace`，验收会改写它。任何验收实例启动前先记录原值（包括不存在的情况）：
+4. 视觉验收可用 `FLOATING_WORKSPACE_APPEARANCE=light|dark`、`FLOATING_WORKSPACE_REDUCE_TRANSPARENCY=1` 和 `FLOATING_WORKSPACE_INCREASE_CONTRAST=1` 覆盖单个验收进程。未设置或值无效时回退到真实系统设置；不得为验收修改全局 macOS 外观或辅助功能偏好。
+5. `FLOATING_WORKSPACE_STORE_URL` 不隔离窗口 frame。frame 保存在 UserDefaults 域 `local.floatingworkspace`，验收会改写它。任何验收实例启动前先记录原值（包括不存在的情况）：
 
    ```bash
    RUN="$PWD/.artifacts/acceptance/<run>"
@@ -29,11 +30,11 @@
      echo absent > "$RUN/frame-before.state"
    fi
    ```
-5. 日期化终端输出、辅助脚本和截图仅保存到 `.artifacts/acceptance/`。截图不是必选项；不得为取证授予 Screen Recording 权限。
-6. 操作真实窗口时，等待目标应用确实成为 frontmost、目标 alert 确实出现，再发送输入或记录结果。不要把 `activate` 调用返回当成 frontmost 已成立。
-7. 八组全程确认：没有 Accessibility 或 Screen Recording 权限提示，没有 SkyLight/私有 API 依赖，Phase 1 进程没有网络请求。可用 `lsof -nP -a -p <pid> -i` 和交互期间的网络进程采样辅助确认无网络连接。
-8. 每个用例结束后通过菜单正常退出；保存失败用例使用明确的放弃退出按钮。清理自己启动的 Safari、Notes 和 IDE，但不修改其中已有内容。
-9. 全部实例退出后恢复 frame，并核对结果与记录一致：
+6. 日期化终端输出、辅助脚本和截图仅保存到 `.artifacts/acceptance/`。截图不是必选项；不得为取证授予 Screen Recording 权限。
+7. 操作真实窗口时，等待目标应用确实成为 frontmost、目标 alert 确实出现，再发送输入或记录结果。不要把 `activate` 调用返回当成 frontmost 已成立。
+8. 八组全程确认：没有 Accessibility 或 Screen Recording 权限提示，没有 SkyLight/私有 API 依赖，Phase 1 进程没有网络请求。可用 `lsof -nP -a -p <pid> -i` 和交互期间的网络进程采样辅助确认无网络连接。
+9. 每个用例结束后通过菜单正常退出；保存失败用例使用明确的放弃退出按钮。清理自己启动的 Safari、Notes 和 IDE，但不修改其中已有内容。
+10. 全部实例退出后恢复 frame，并核对结果与记录一致：
 
    ```bash
    if [[ "$(cat "$RUN/frame-before.state")" == present ]]; then
@@ -126,6 +127,17 @@ APP="$PWD/dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace"
 
 通过标准：损坏文件被移动而非覆盖，时间戳备份保留原始字节，应用以默认内容启动并显示恢复信息。
 
+## 9. 玻璃视觉、辅助功能与资源
+
+1. 分别用独立数据文件启动四个最终 app 实例：浅色、深色、减少透明度、增强对比度。浅色／深色只设置 `FLOATING_WORKSPACE_APPEARANCE`；后两组同时设置对应辅助功能覆盖。不得修改全局系统偏好。
+2. 通过公开视图状态核对实际 palette 和 material，并用真实窗口的 AX 标签核对便签、模式、图钉、保存状态与 alert 仍可访问：浅色 C 的两个渐变色为 `#E0F4FF` alpha `0.68`、`#EEE4FF` alpha `0.60`；深色 B 的背景为 `#121926` alpha `0.64`，强调色为 `#8BD0FF`。普通状态使用 active、emphasized 的 `.popover` material 和 behind-window blending。
+3. 减少透明度实例必须隐藏 material 与渐变，使用 alpha `1` 的实色背景、内容底色和侧栏；增强对比度实例的边框 alpha 必须高于普通实例（浅色 `0.90`、深色 `0.55`）。恢复无覆盖启动后应重新读取真实系统设置。
+4. 检查最终包中的 16px／32px 菜单栏模板和 App Icon 小尺寸资源：模板保持单色 alpha 与 `悬浮工作台` AX 描述，悬浮徽章主体、图钉徽章可辨认；图片、网页模式图标和文字仍存在但按钮禁用，运行全程无 Dock 图标。截图只在现有 harness 已有权限时采集，不把不可用截图写成证据。
+5. 在空白模式选择可识别的非默认背景色，立即核对保存的 sRGB 值和实际背景视图：用户颜色成为背景 tint，主题渐变被抑制；减少透明度时仍保留该用户颜色。切换外观不得额外保存或改变该颜色。
+6. 外观变化前后比较隔离 JSON 的内容与保存次数，不得出现仅由外观变化触发的新保存；确认没有持续动画、轮询或高频重绘循环。
+
+通过标准：四种隔离外观与辅助功能回退的实际状态正确，文字和 AX 标签可用，小尺寸资源完整，空白用户颜色不被渐变覆盖，未引入额外保存、禁用模式启用、持续重绘或 Dock 图标。
+
 ## 完成判定
 
-只有自动化测试、release 构建、签名校验及以上八组最终 app 验收全部通过，并按准备第 9 步恢复窗口 frame，才能声明 Phase 1 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。
+只有自动化测试、release 构建、签名校验、以上八组最终 app 功能验收及第 9 组视觉验收全部通过，并按准备第 10 步恢复窗口 frame，才能声明 Phase 1 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。

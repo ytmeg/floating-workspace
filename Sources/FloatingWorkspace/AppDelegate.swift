@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.applyAcceptanceOverrides()
         applicationIconController = ApplicationIconController(application: NSApp)
         let fileURL = Self.workspaceFileURL()
         do {
@@ -67,6 +68,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyController?.stop()
+    }
+
+    @MainActor
+    static func applyAcceptanceOverrides(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        switch environment["FLOATING_WORKSPACE_APPEARANCE"] {
+        case "light":
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark":
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApp.appearance = nil
+        }
+        WorkspaceAppearance.acceptanceReduceTransparency =
+            environment["FLOATING_WORKSPACE_REDUCE_TRANSPARENCY"] == "1" ? true : nil
+        WorkspaceAppearance.acceptanceIncreaseContrast =
+            environment["FLOATING_WORKSPACE_INCREASE_CONTRAST"] == "1" ? true : nil
     }
 
     static func workspaceFileURL(

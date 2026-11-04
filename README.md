@@ -13,6 +13,22 @@
 
 Phase 1 不包含图片编辑、网页正文编辑、网页编辑回放或网络功能。
 
+## 玻璃视觉与辅助功能
+
+- 浅色外观采用 C「浅色渐变玻璃」：`#E0F4FF` → `#EEE4FF` 蓝紫渐变叠加公开系统材质。
+- 深色外观采用 B「深色 HUD 玻璃」：以 `#121926` 深蓝黑为背景，强调色为 `#8BD0FF`。
+- 应用图标采用「悬浮徽章」：叠放窗口形体搭配小图钉徽章；浅色、深色资源随有效外观切换。菜单栏使用单色模板图，模式入口保留 SF Symbols 与中文标签。
+- 系统开启「减少透明度」时隐藏材质与渐变并使用实色背景；开启「增强对比度」时加强边框。默认读取真实系统外观和辅助功能设置，不修改全局 macOS 偏好。
+- 空白模式继续保留用户选择的背景色，不用主题渐变覆盖；图片和网页入口仍禁用。
+
+图标矢量生成源码为 `Scripts/generate-icons.swift`。修改后重新生成全部资源并打包：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift \
+  Scripts/generate-icons.swift Resources/Assets.xcassets
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer Scripts/build-app.sh
+```
+
 ## 使用
 
 - 标题栏右侧图钉按钮：显示当前置顶状态（`已置顶`／`未置顶`），点击切换置顶。
@@ -57,6 +73,21 @@ FLOATING_WORKSPACE_STORE_URL="$PWD/.artifacts/acceptance/workspace-v1.json" \
 ```
 
 `FLOATING_WORKSPACE_STORE_URL` 只隔离 JSON 数据文件，不隔离窗口 frame：所有实例共用 UserDefaults 域 `local.floatingworkspace` 中的 frame。验收前后需记录并恢复该键，步骤见验收文档。
+
+视觉验收可为单独启动的进程设置以下覆盖项；它们只影响该实例，不写入系统设置：
+
+```bash
+FLOATING_WORKSPACE_APPEARANCE=light \
+FLOATING_WORKSPACE_REDUCE_TRANSPARENCY=1 \
+FLOATING_WORKSPACE_INCREASE_CONTRAST=1 \
+FLOATING_WORKSPACE_STORE_URL="$PWD/.artifacts/acceptance/workspace-v1.json" \
+  dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace
+```
+
+- `FLOATING_WORKSPACE_APPEARANCE` 仅接受 `light` 或 `dark`；其他值回退到系统外观。
+- `FLOATING_WORKSPACE_REDUCE_TRANSPARENCY=1` 强制本进程使用减少透明度回退。
+- `FLOATING_WORKSPACE_INCREASE_CONTRAST=1` 强制本进程使用增强对比度边框。
+- 不设置这些变量时使用真实系统设置；辅助功能变量只有精确值 `1` 是覆盖，其他值回退到系统设置。
 
 多个单独启动的实例如果使用同一个数据文件，彼此不隔离，后保存的实例会覆盖其他实例的内容；应用不加锁，也不限制为单实例。需要并行运行的隔离验收必须为每个实例使用不同的 `FLOATING_WORKSPACE_STORE_URL`。
 
