@@ -64,8 +64,11 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun actool \
   --minimum-deployment-target 13.0 \
   --output-partial-info-plist "$ROOT/dist/actool-partial-info.plist" \
   --compile "$APP/Contents/Resources" \
+  --output-format human-readable-text --notices --warnings --errors \
   "$ROOT/Resources/Assets.xcassets"
-for filename in Assets.car AppIcon.icns; do
+cp "$APP_ICON_DIR/AppIcon-1024.png" "$APP/Contents/Resources/AppIcon-Light.png"
+cp "$APP_ICON_DIR/AppIcon-Dark-1024.png" "$APP/Contents/Resources/AppIcon-Dark.png"
+for filename in Assets.car AppIcon.icns AppIcon-Light.png AppIcon-Dark.png; do
   if [[ ! -f "$APP/Contents/Resources/$filename" ]]; then
     printf 'Missing compiled icon resource: %s\n' "$filename" >&2
     exit 1

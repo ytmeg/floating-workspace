@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: FloatingWindowController?
     var workspaceViewController: WorkspaceViewController?
     var menuBarController: MenuBarController?
+    var applicationIconController: ApplicationIconController?
     var hotkeyController: HotkeyController?
     var terminationReplyHandler: (Bool) -> Void = {
         NSApp.reply(toApplicationShouldTerminate: $0)
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        applicationIconController = ApplicationIconController(application: NSApp)
         let fileURL = Self.workspaceFileURL()
         do {
             let fileStore = WorkspaceFileStore(fileURL: fileURL)

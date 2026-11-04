@@ -127,6 +127,24 @@ final class IconResourceTests: XCTestCase {
         }
     }
 
+    func testMenuTemplateMatchesApprovedPaneRotationsAndAlpha() throws {
+        let image = try loadImage(at: catalogURL.appendingPathComponent("MenuBarTemplate.imageset/MenuBarTemplate-32.png"))
+        let pixels = try rgbaPixels(from: image)
+        let cases = [
+            (x: 18.0, y: 21.0, alpha: 64),       // Back rect only: 0.25 alpha.
+            (x: 48.0, y: 27.0, alpha: 115),      // Front rect only: 0.45 alpha.
+            (x: 35.0, y: 35.0, alpha: 150),      // Overlap: 1 - 0.75 × 0.55.
+            (x: 52.5, y: 45.5, alpha: 255),      // Opaque badge.
+            (x: 37.0, y: 33.0, alpha: 0),        // Interior of transformed pin cutout.
+        ]
+        for testCase in cases {
+            let column = Int(testCase.x * Double(image.width) / 64)
+            let row = Int(testCase.y * Double(image.height) / 64)
+            let alpha = pixels[(row * image.width + column) * 4 + 3]
+            XCTAssertEqual(Double(alpha), Double(testCase.alpha), accuracy: 2, "SVG point (\(testCase.x), \(testCase.y))")
+        }
+    }
+
     func testInfoPlistNamesAppIcon() throws {
         let plist = try NSDictionary(
             contentsOf: repositoryURL.appendingPathComponent("Resources/Info.plist"),
