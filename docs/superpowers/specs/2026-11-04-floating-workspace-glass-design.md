@@ -66,7 +66,11 @@
 
 ### GlassBackgroundView
 
-使用公开 `NSVisualEffectView` 构建背景，叠加浅色模式的蓝紫渐变层。背景位于所有编辑控件后方，不拦截鼠标和键盘输入，不改变现有控制器的业务逻辑。
+使用公开 `NSVisualEffectView` 构建背景，叠加浅色模式的蓝紫渐变层。背景位于所有编辑控件后方，不拦截鼠标和键盘输入，不改变现有控制器的业务逻辑。空白模式的用户颜色由面板背景绘制，玻璃层保持透明，避免半透明颜色叠加两次。
+
+1pt 边框由最上层、不拦截事件的 `GlassBorderView` 绘制：只描左、右、下三边，下方两角使用与 titled panel 遮罩一致的圆角，顶边由系统标题栏分隔线承担。
+
+控制器在有效外观变化和 `NSWorkspace.accessibilityDisplayOptionsDidChangeNotification` 时无条件刷新 palette；内容变化只有在模式或空白背景色改变时才刷新，便签逐键输入、置顶、标题和保存状态不触发重新着色或渐变重绘。
 
 ### 图标资源与打包
 

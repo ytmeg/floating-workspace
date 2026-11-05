@@ -18,17 +18,18 @@ Phase 1 不包含图片编辑、网页正文编辑、网页编辑回放或网络
 - 浅色外观采用 C「浅色渐变玻璃」：`#E0F4FF` → `#EEE4FF` 蓝紫渐变叠加公开系统材质。
 - 深色外观采用 B「深色 HUD 玻璃」：以 `#121926` 深蓝黑为背景，强调色为 `#8BD0FF`。
 - 应用图标采用「悬浮徽章」：叠放窗口形体搭配小图钉徽章；浅色、深色资源随有效外观切换。菜单栏使用单色模板图，模式入口保留 SF Symbols 与中文标签。
-- 系统开启「减少透明度」时隐藏材质与渐变并使用实色背景；开启「增强对比度」时使用可见性更高的边框（浅色为深色描边，深色为浅色描边）。默认读取真实系统外观和辅助功能设置，不修改全局 macOS 偏好。
+- 系统开启「减少透明度」时隐藏材质与渐变并使用实色背景；开启「增强对比度」时使用可见性更高的边框（浅色为深色描边，深色为浅色描边）。默认读取真实系统外观和辅助功能设置，运行中切换这两项会通过公开的辅助功能通知即时刷新，不轮询，也不修改全局 macOS 偏好。
+- 1pt 边框绘制在内容最上层，只描左、右、下三边，下方两角随面板圆角弯曲；顶边交给系统标题栏分隔线，不再叠出第二条线。
 - 窗口阴影使用 AppKit 原生 `NSPanel.hasShadow`，不在内容背景 layer 上添加自定义阴影或额外离屏阴影通道。
-- 空白模式继续保留用户选择的背景色，不用主题渐变或玻璃材质覆盖；图片和网页入口仍禁用。
+- 空白模式继续保留用户选择的背景色，不用主题渐变或玻璃材质覆盖；该颜色只由面板绘制一次，alpha 小于 1 时不会被重复叠加。图片和网页入口仍禁用。
 
-图标矢量生成源码为 `Scripts/generate-icons.swift`。修改后重新生成全部资源并打包：
+图标矢量生成源码为 `Scripts/generate-icons.swift`。默认的 `Scripts/build-app.sh` 和测试只把资源生成到临时目录，再用 `cmp` 与 `Resources/Assets.xcassets` 逐字节比较，有漂移时报出文件名并失败，不会改写已提交资源。修改生成器后，显式重新生成并打包：
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift \
-  Scripts/generate-icons.swift Resources/Assets.xcassets
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer Scripts/build-app.sh
+Scripts/build-app.sh --update
 ```
+
+也可以只检查或只更新资源：`Scripts/check-icon-resources.sh [--update]`。两个脚本默认使用 `/Applications/Xcode.app/Contents/Developer`，已设置的 `DEVELOPER_DIR` 优先。
 
 ## 使用
 

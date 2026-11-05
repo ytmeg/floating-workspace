@@ -1,6 +1,6 @@
 # Floating Workspace Phase 1 验收
 
-本规程只验收 `dist/FloatingWorkspace.app` 的最终 release 构建。便签和空白属于 Phase 1；图片和网页不在本次范围内。任何一组失败都阻止 Phase 1 完成声明。
+本规程只验收 `dist/FloatingWorkspace.app` 的最终 release 构建。便签和空白属于 Phase 1；图片和网页不在本次范围内。任何一组失败都阻止 Phase 1 + glass visual refresh 完成声明。
 
 ## 准备与证据边界
 
@@ -140,4 +140,4 @@ APP="$PWD/dist/FloatingWorkspace.app/Contents/MacOS/FloatingWorkspace"
 
 ## 完成判定
 
-只有自动化测试、release 构建、签名校验、以上八组最终 app 功能验收及第 9 组视觉验收全部通过，并按准备第 10 步恢复窗口 frame，才能声明 Phase 1 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。
+只有自动化测试、release 构建、签名校验、以上八组最终 app 功能验收及第 9 组视觉验收全部通过，并按准备第 10 步恢复窗口 frame，才能声明 Phase 1 + glass visual refresh 完成。记录每组实际命令、日期化输出与结果；失败、未执行和不可复现必须原样记录，不得用早期 debug-app 证据替代。
