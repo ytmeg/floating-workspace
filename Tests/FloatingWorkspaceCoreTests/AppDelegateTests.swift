@@ -61,7 +61,10 @@ final class AppDelegateTests: XCTestCase {
 
         XCTAssertFalse(palette.usesTransparency)
         XCTAssertTrue(palette.gradientColors.isEmpty)
-        XCTAssertEqual(palette.borderColor.alphaComponent, 0.90, accuracy: 0.001)
+        XCTAssertEqual(
+            palette.borderColor,
+            NSColor(srgbRed: 0x12 / 255, green: 0x19 / 255, blue: 0x26 / 255, alpha: 0.45)
+        )
     }
 
     func testCleanStoreTerminatesImmediately() throws {

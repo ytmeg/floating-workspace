@@ -71,7 +71,7 @@ final class GlassBackgroundViewTests: XCTestCase {
         try assertBackground(view, equals: .clear)
     }
 
-    func testApplyRendersPaletteBorderAndShadowOnBackgroundLayer() throws {
+    func testApplyRendersPaletteBorderWithoutCustomLayerShadow() throws {
         let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let palette = try makePalette()
 
@@ -80,12 +80,11 @@ final class GlassBackgroundViewTests: XCTestCase {
         let layer = try XCTUnwrap(view.layer)
         XCTAssertGreaterThan(layer.borderWidth, 0)
         XCTAssertEqual(layer.borderColor, palette.borderColor.cgColor)
-        XCTAssertGreaterThan(layer.shadowOpacity, 0)
-        XCTAssertGreaterThan(layer.shadowRadius, 0)
-        XCTAssertEqual(layer.shadowColor, palette.shadowColor.cgColor)
+        XCTAssertEqual(layer.shadowOpacity, 0)
+        XCTAssertNil(layer.shadowPath)
     }
 
-    func testIncreasedContrastStrengthensRenderedBorder() throws {
+    func testLightIncreasedContrastRendersDarkBorderWithMeaningfulContrast() throws {
         let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let normal = WorkspaceAppearance.make(
@@ -99,14 +98,95 @@ final class GlassBackgroundViewTests: XCTestCase {
             increaseContrast: true
         )
         view.apply(normal)
-        let normalBorder = try XCTUnwrap(view.layer?.borderColor)
-        let normalAlpha = try XCTUnwrap(NSColor(cgColor: normalBorder)).alphaComponent
+        let normalBorder = try renderedBorderColor(view)
 
         view.apply(contrast)
 
-        let contrastBorder = try XCTUnwrap(view.layer?.borderColor)
-        XCTAssertEqual(contrastBorder, contrast.borderColor.cgColor)
-        XCTAssertGreaterThan(NSColor(cgColor: contrastBorder)?.alphaComponent ?? 0, normalAlpha)
+        let contrastBorder = try renderedBorderColor(view)
+        try assertBorder(contrastBorder, red: 0x12, green: 0x19, blue: 0x26, alpha: 0.45)
+        let background = NSColor(srgbRed: 0xE0 / 255, green: 0xF4 / 255, blue: 1, alpha: 1)
+        let normalRatio = try contrastRatio(normalBorder, over: background)
+        let contrastRatio = try contrastRatio(contrastBorder, over: background)
+        XCTAssertGreaterThan(contrastRatio, 2)
+        XCTAssertGreaterThan(contrastRatio, normalRatio * 2)
+    }
+
+    func testDarkIncreasedContrastRendersBrightBorderWithMeaningfulContrast() throws {
+        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let normal = WorkspaceAppearance.make(
+            appearance: appearance,
+            reduceTransparency: false,
+            increaseContrast: false
+        )
+        let contrast = WorkspaceAppearance.make(
+            appearance: appearance,
+            reduceTransparency: false,
+            increaseContrast: true
+        )
+        view.apply(normal)
+        let normalBorder = try renderedBorderColor(view)
+
+        view.apply(contrast)
+
+        let contrastBorder = try renderedBorderColor(view)
+        try assertBorder(contrastBorder, red: 0xFF, green: 0xFF, blue: 0xFF, alpha: 0.55)
+        let background = NSColor(srgbRed: 0x12 / 255, green: 0x19 / 255, blue: 0x26 / 255, alpha: 1)
+        let normalRatio = try contrastRatio(normalBorder, over: background)
+        let contrastRatio = try contrastRatio(contrastBorder, over: background)
+        XCTAssertGreaterThan(contrastRatio, 4.5)
+        XCTAssertGreaterThan(contrastRatio, normalRatio * 2)
+    }
+
+    private func renderedBorderColor(_ view: GlassBackgroundView) throws -> NSColor {
+        let border = try XCTUnwrap(view.layer?.borderColor)
+        return try XCTUnwrap(NSColor(cgColor: border)?.usingColorSpace(.sRGB))
+    }
+
+    private func assertBorder(
+        _ color: NSColor,
+        red: UInt8,
+        green: UInt8,
+        blue: UInt8,
+        alpha: Double,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let components = try sRGBComponents(color, file: file, line: line)
+        XCTAssertEqual(components.red, Double(red) / 255, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(components.green, Double(green) / 255, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(components.blue, Double(blue) / 255, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(components.alpha, alpha, accuracy: 0.001, file: file, line: line)
+    }
+
+    private func contrastRatio(_ border: NSColor, over background: NSColor) throws -> Double {
+        let foreground = try sRGBComponents(border)
+        let backdrop = try sRGBComponents(background)
+        let alpha = foreground.alpha
+        let borderLuminance = luminance(
+            red: foreground.red * alpha + backdrop.red * (1 - alpha),
+            green: foreground.green * alpha + backdrop.green * (1 - alpha),
+            blue: foreground.blue * alpha + backdrop.blue * (1 - alpha)
+        )
+        let backgroundLuminance = luminance(red: backdrop.red, green: backdrop.green, blue: backdrop.blue)
+        return (max(borderLuminance, backgroundLuminance) + 0.05)
+            / (min(borderLuminance, backgroundLuminance) + 0.05)
+    }
+
+    private func luminance(red: Double, green: Double, blue: Double) -> Double {
+        func linear(_ component: Double) -> Double {
+            component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
+    private func sRGBComponents(
+        _ color: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (red: Double, green: Double, blue: Double, alpha: Double) {
+        let color = try XCTUnwrap(color.usingColorSpace(.sRGB), file: file, line: line)
+        return (color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent)
     }
 
     private func makePalette(reduceTransparency: Bool = false) throws -> WorkspacePalette {

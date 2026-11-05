@@ -29,6 +29,7 @@ final class FloatingWindowControllerTests: XCTestCase {
         )
         XCTAssertEqual(controller.panel.title, "悬浮工作台")
         XCTAssertFalse(controller.panel.isOpaque)
+        XCTAssertTrue(controller.panel.hasShadow)
         XCTAssertEqual(controller.panel.backgroundColor, .clear)
     }
 

@@ -7,7 +7,6 @@ public struct WorkspacePalette {
     public let railBackgroundColor: NSColor
     public let accentColor: NSColor
     public let borderColor: NSColor
-    public let shadowColor: NSColor
     public let usesTransparency: Bool
 }
 
@@ -31,7 +30,6 @@ public enum WorkspaceAppearance {
                 railBackgroundColor: color(0x121926, alpha: reduceTransparency ? 1 : 0.72),
                 accentColor: color(0x8BD0FF, alpha: 1),
                 borderColor: color(0xFFFFFF, alpha: increaseContrast ? 0.55 : 0.20),
-                shadowColor: color(0x000000, alpha: 0.45),
                 usesTransparency: !reduceTransparency
             )
         }
@@ -45,8 +43,9 @@ public enum WorkspaceAppearance {
             contentBackgroundColor: color(0xFFFFFF, alpha: reduceTransparency ? 1 : 0.92),
             railBackgroundColor: color(0xFFFFFF, alpha: reduceTransparency ? 1 : 0.36),
             accentColor: color(0x4C5FD5, alpha: 1),
-            borderColor: color(0xFFFFFF, alpha: increaseContrast ? 0.90 : 0.55),
-            shadowColor: color(0x000000, alpha: 0.18),
+            borderColor: increaseContrast
+                ? color(0x121926, alpha: 0.45)
+                : color(0xFFFFFF, alpha: 0.55),
             usesTransparency: !reduceTransparency
         )
     }

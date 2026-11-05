@@ -26,6 +26,7 @@ public final class FloatingWindowController: NSObject {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
+        panel.hasShadow = true
         panel.minSize = NSSize(width: 360, height: 320)
 
         let workspace = WorkspaceViewController(store: store, windowController: self)

@@ -55,7 +55,7 @@ final class WorkspaceAppearanceTests: XCTestCase {
         try assertColor(dark.solidBackgroundColor, red: 0x12, green: 0x19, blue: 0x26, alpha: 1)
     }
 
-    func testIncreaseContrastStrengthensBorderWithoutChangingAccent() throws {
+    func testLightIncreaseContrastUsesDarkBorderWithoutChangingAccent() throws {
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let light = WorkspaceAppearance.make(
             appearance: appearance,
@@ -68,7 +68,7 @@ final class WorkspaceAppearanceTests: XCTestCase {
             increaseContrast: true
         )
 
-        XCTAssertGreaterThan(contrast.borderColor.alphaComponent, light.borderColor.alphaComponent)
+        try assertColor(contrast.borderColor, red: 0x12, green: 0x19, blue: 0x26, alpha: 0.45)
         XCTAssertEqual(contrast.accentColor, light.accentColor)
     }
 
@@ -90,7 +90,6 @@ final class WorkspaceAppearanceTests: XCTestCase {
         XCTAssertEqual(current.railBackgroundColor, expected.railBackgroundColor)
         XCTAssertEqual(current.accentColor, expected.accentColor)
         XCTAssertEqual(current.borderColor, expected.borderColor)
-        XCTAssertEqual(current.shadowColor, expected.shadowColor)
     }
 
     private func assertColor(
