@@ -38,7 +38,7 @@ final class GlassBackgroundViewTests: XCTestCase {
         try assertBackground(view, equals: palette.solidBackgroundColor)
     }
 
-    func testBlankColorSuppressesPaletteGradientAndBecomesTint() throws {
+    func testBlankColorSuppressesPaletteGradientAndLeavesPanelColorUnpainted() throws {
         let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let blankColor = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 0.8)
 
@@ -46,7 +46,7 @@ final class GlassBackgroundViewTests: XCTestCase {
 
         XCTAssertTrue(view.effectView.isHidden)
         XCTAssertTrue(view.gradientView.isHidden)
-        try assertBackground(view, equals: blankColor)
+        try assertBackground(view, equals: .clear)
     }
 
     func testBlankColorTakesPrecedenceForReducedTransparencyFallback() throws {
@@ -57,7 +57,34 @@ final class GlassBackgroundViewTests: XCTestCase {
 
         XCTAssertTrue(view.effectView.isHidden)
         XCTAssertTrue(view.gradientView.isHidden)
-        try assertBackground(view, equals: blankColor)
+        try assertBackground(view, equals: .clear)
+    }
+
+    func testTranslucentBlankColorIsNotCompositedASecondTime() throws {
+        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let blankColor = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.8, alpha: 0.5)
+
+        for palette in [try makePalette(), try makePalette(reduceTransparency: true)] {
+            view.apply(palette, blankColor: blankColor)
+
+            let background = try XCTUnwrap(view.layer?.backgroundColor)
+            XCTAssertEqual(background.alpha, 0, accuracy: 0.001)
+            XCTAssertTrue(view.effectView.isHidden)
+            XCTAssertTrue(view.gradientView.isHidden)
+        }
+    }
+
+    func testGradientInvalidatesOnlyWhenColorsChange() throws {
+        let gradient = GradientView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let palette = try makePalette()
+        gradient.colors = palette.gradientColors
+        let invalidations = gradient.invalidationCount
+
+        gradient.colors = palette.gradientColors
+        XCTAssertEqual(gradient.invalidationCount, invalidations)
+
+        gradient.colors = try makePalette(appearance: .darkAqua).gradientColors
+        XCTAssertEqual(gradient.invalidationCount, invalidations + 1)
     }
 
     func testReapplyingTransparentPaletteRestoresMaterialAndGradient() throws {
@@ -83,21 +110,73 @@ final class GlassBackgroundViewTests: XCTestCase {
         try assertBackground(view, equals: .clear)
     }
 
-    func testApplyRendersPaletteBorderWithoutCustomLayerShadow() throws {
+    func testBackgroundLayerHasNoBorderOrCustomShadow() throws {
         let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
-        let palette = try makePalette()
 
-        view.apply(palette)
+        view.apply(try makePalette())
 
         let layer = try XCTUnwrap(view.layer)
-        XCTAssertGreaterThan(layer.borderWidth, 0)
-        XCTAssertEqual(layer.borderColor, palette.borderColor.cgColor)
+        XCTAssertEqual(layer.borderWidth, 0)
         XCTAssertEqual(layer.shadowOpacity, 0)
         XCTAssertNil(layer.shadowPath)
     }
 
+    func testBorderStrokesSidesAndRoundedBottomCornersButNotTitlebarEdge() throws {
+        let border = GlassBorderView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let palette = WorkspaceAppearance.make(
+            appearance: try XCTUnwrap(NSAppearance(named: .aqua)),
+            reduceTransparency: false,
+            increaseContrast: true
+        )
+        border.apply(palette)
+        border.layoutSubtreeIfNeeded()
+
+        let stroke = try XCTUnwrap(border.strokeLayer)
+        XCTAssertEqual(stroke.lineWidth, 1)
+        XCTAssertNil(stroke.fillColor)
+        XCTAssertEqual(stroke.strokeColor, palette.borderColor.cgColor)
+        XCTAssertEqual(stroke.frame, border.bounds)
+        XCTAssertNil(border.hitTest(NSPoint(x: 1, y: 60)))
+
+        // Bitmap rows run top to bottom; the view is unflipped, so the titlebar edge is row 0.
+        let alpha = try renderedAlpha(stroke, size: border.bounds.size)
+        XCTAssertGreaterThan(alpha(0, 60), 0, "left side")
+        XCTAssertGreaterThan(alpha(199, 60), 0, "right side")
+        XCTAssertGreaterThan(alpha(100, 119), 0, "bottom edge")
+        XCTAssertEqual(alpha(100, 0), 0, "titlebar edge must not get a second line")
+        XCTAssertEqual(alpha(0, 119), 0, "bottom-left corner follows the panel radius")
+        XCTAssertEqual(alpha(199, 119), 0, "bottom-right corner follows the panel radius")
+        XCTAssertGreaterThan(alpha(0, 0), 0, "top corners stay square under the titlebar")
+        // The stroke centerline sits 0.5 pt inside the edge; sample around its 45° point.
+        let radius = GlassBorderView.bottomCornerRadius
+        let inset = Int(radius - (radius - 0.5) / 2.0.squareRoot())
+        let arc: (Int, Int) -> UInt8 = { x, row in
+            (-1...1).flatMap { dx in (-1...1).map { dy in alpha(x + dx, row + dy) } }.max() ?? 0
+        }
+        XCTAssertGreaterThan(arc(inset, 119 - inset), 0, "bottom-left arc")
+        XCTAssertGreaterThan(arc(199 - inset, 119 - inset), 0, "bottom-right arc")
+        XCTAssertEqual(alpha(inset + 3, 119 - inset - 3), 0, "arc interior stays unpainted")
+    }
+
+    func testBorderPathTracksResize() throws {
+        let border = GlassBorderView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        border.apply(try makePalette())
+        border.layoutSubtreeIfNeeded()
+
+        border.setFrameSize(NSSize(width: 400, height: 300))
+        border.layoutSubtreeIfNeeded()
+
+        let stroke = try XCTUnwrap(border.strokeLayer)
+        XCTAssertEqual(stroke.frame, border.bounds)
+        let box = try XCTUnwrap(stroke.path?.boundingBoxOfPath)
+        XCTAssertEqual(box.minX, 0.5, accuracy: 0.001)
+        XCTAssertEqual(box.maxX, 399.5, accuracy: 0.001)
+        XCTAssertEqual(box.minY, 0.5, accuracy: 0.001)
+        XCTAssertEqual(box.maxY, 300, accuracy: 0.001)
+    }
+
     func testLightIncreasedContrastRendersDarkBorderWithMeaningfulContrast() throws {
-        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let view = GlassBorderView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let normal = WorkspaceAppearance.make(
             appearance: appearance,
@@ -124,7 +203,7 @@ final class GlassBackgroundViewTests: XCTestCase {
     }
 
     func testDarkIncreasedContrastRendersBrightBorderWithMeaningfulContrast() throws {
-        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let view = GlassBorderView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
         let normal = WorkspaceAppearance.make(
             appearance: appearance,
@@ -150,8 +229,29 @@ final class GlassBackgroundViewTests: XCTestCase {
         XCTAssertGreaterThan(contrastRatio, normalRatio * 2)
     }
 
-    private func renderedBorderColor(_ view: GlassBackgroundView) throws -> NSColor {
-        let border = try XCTUnwrap(view.layer?.borderColor)
+    private func renderedAlpha(_ layer: CALayer, size: NSSize) throws -> (Int, Int) -> UInt8 {
+        let width = Int(size.width)
+        let height = Int(size.height)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            layer.render(in: context)
+        }
+        // Bitmap memory starts with the top row, so row 0 is the titlebar edge.
+        return { x, row in pixels[(row * width + x) * 4 + 3] }
+    }
+
+    private func renderedBorderColor(_ view: GlassBorderView) throws -> NSColor {
+        let border = try XCTUnwrap(view.strokeLayer?.strokeColor)
         return try XCTUnwrap(NSColor(cgColor: border)?.usingColorSpace(.sRGB))
     }
 
@@ -201,9 +301,12 @@ final class GlassBackgroundViewTests: XCTestCase {
         return (color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent)
     }
 
-    private func makePalette(reduceTransparency: Bool = false) throws -> WorkspacePalette {
+    private func makePalette(
+        appearance: NSAppearance.Name = .aqua,
+        reduceTransparency: Bool = false
+    ) throws -> WorkspacePalette {
         WorkspaceAppearance.make(
-            appearance: try XCTUnwrap(NSAppearance(named: .aqua)),
+            appearance: try XCTUnwrap(NSAppearance(named: appearance)),
             reduceTransparency: reduceTransparency,
             increaseContrast: false
         )

@@ -10,6 +10,12 @@ final class WorkspaceViewControllerTests: XCTestCase {
         NSWindow.removeFrame(usingName: "FloatingWorkspaceFrame")
     }
 
+    override func tearDown() {
+        WorkspaceAppearance.acceptanceReduceTransparency = nil
+        WorkspaceAppearance.acceptanceIncreaseContrast = nil
+        super.tearDown()
+    }
+
     func testPhaseOneControlsUseApprovedSizingAndIdentifiers() throws {
         let fixture = try makeWorkspace()
 
@@ -129,6 +135,131 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
         XCTAssertTrue(scheduler.delays.isEmpty)
         XCTAssertTrue(saver.snapshots.isEmpty)
+    }
+
+    func testAccessibilityDisplayOptionsNotificationSwitchesGlassAndSolidFallback() throws {
+        WorkspaceAppearance.acceptanceReduceTransparency = false
+        let fixture = try makeWorkspace()
+        let glass = fixture.workspace.glassBackgroundView
+        XCTAssertFalse(glass.effectView.isHidden)
+        XCTAssertFalse(glass.gradientView.isHidden)
+
+        for reduceTransparency in [true, false, true] {
+            let updates = fixture.workspace.glassAppearanceUpdateCount
+            WorkspaceAppearance.acceptanceReduceTransparency = reduceTransparency
+
+            NSWorkspace.shared.notificationCenter.post(
+                name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                object: NSWorkspace.shared
+            )
+
+            let palette = WorkspaceAppearance.current(appearance: fixture.workspace.view.effectiveAppearance)
+            XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates + 1, "exactly one subscription")
+            XCTAssertEqual(glass.effectView.isHidden, reduceTransparency)
+            XCTAssertEqual(glass.gradientView.isHidden, reduceTransparency)
+            let background = try XCTUnwrap(glass.layer?.backgroundColor)
+            XCTAssertEqual(background, reduceTransparency ? palette.solidBackgroundColor.cgColor : NSColor.clear.cgColor)
+            XCTAssertEqual(fixture.workspace.leftRail.layer?.backgroundColor, palette.railBackgroundColor.cgColor)
+            XCTAssertEqual(fixture.workspace.noteScrollView.backgroundColor, palette.contentBackgroundColor)
+        }
+        XCTAssertFalse(fixture.doubles.store.isDirty)
+    }
+
+    func testEffectiveAppearanceChangeStillRestylesUnconditionally() throws {
+        let fixture = try makeWorkspace()
+        let updates = fixture.workspace.glassAppearanceUpdateCount
+
+        // Assigning the appearance triggers AppKit's own effective-appearance callback.
+        fixture.workspace.view.appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates + 1)
+        let palette = WorkspaceAppearance.current(appearance: fixture.workspace.view.effectiveAppearance)
+        XCTAssertEqual(fixture.workspace.glassBackgroundView.gradientView.colors, palette.gradientColors)
+        XCTAssertEqual(fixture.workspace.borderView.strokeLayer?.strokeColor, palette.borderColor.cgColor)
+    }
+
+    func testNoteOnlyEditsDoNotRestyleOrRedrawGlass() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let window = FloatingWindowController(store: doubles.store)
+        let workspace = try XCTUnwrap(window.panel.contentViewController as? WorkspaceViewController)
+        let store = doubles.store
+        let gradient = workspace.glassBackgroundView.gradientView
+        let updates = workspace.glassAppearanceUpdateCount
+        let invalidations = gradient.invalidationCount
+
+        for text in ["a", "ab", "abc"] {
+            workspace.noteTextView.string = text
+            workspace.textDidChange(Notification(
+                name: NSText.didChangeNotification,
+                object: workspace.noteTextView
+            ))
+        }
+        store.update { $0.isPinned.toggle() }
+        store.update { $0.blankTitle = "只改标题" }
+
+        XCTAssertEqual(store.content.noteText, "abc")
+        XCTAssertEqual(workspace.saveStateLabel.stringValue, "保存中")
+        XCTAssertEqual(workspace.glassAppearanceUpdateCount, updates)
+        XCTAssertEqual(gradient.invalidationCount, invalidations)
+
+        workspace.view.appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        XCTAssertEqual(workspace.glassAppearanceUpdateCount, updates + 1)
+        XCTAssertEqual(gradient.invalidationCount, invalidations + 1, "a palette change still redraws the gradient")
+    }
+
+    func testBlankModeAndColorChangesStillRestyle() throws {
+        let fixture = try makeWorkspace()
+        let store = fixture.doubles.store
+        var updates = fixture.workspace.glassAppearanceUpdateCount
+
+        fixture.workspace.selectMode(.blank)
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates + 1)
+        XCTAssertTrue(fixture.workspace.glassBackgroundView.effectView.isHidden)
+        updates = fixture.workspace.glassAppearanceUpdateCount
+
+        store.update { $0.blankTitle = "空白标题" }
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates)
+
+        store.update { $0.blankBackground = RGBAColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.5) }
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates + 1)
+        let well = try XCTUnwrap(fixture.workspace.colorWell.color.usingColorSpace(.sRGB))
+        XCTAssertEqual(well.blueComponent, 0.8, accuracy: 0.001)
+        XCTAssertEqual(well.alphaComponent, 0.5, accuracy: 0.001)
+
+        fixture.workspace.selectMode(.note)
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates + 2)
+        XCTAssertFalse(fixture.workspace.glassBackgroundView.effectView.isHidden)
+    }
+
+    func testTranslucentBlankColorIsPaintedOnceByThePanel() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let window = FloatingWindowController(store: doubles.store)
+        let workspace = try XCTUnwrap(window.panel.contentViewController as? WorkspaceViewController)
+
+        doubles.store.update {
+            $0.selectedMode = .blank
+            $0.blankBackground = RGBAColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.5)
+        }
+
+        let panelColor = try XCTUnwrap(window.panel.backgroundColor.usingColorSpace(.sRGB))
+        XCTAssertEqual(panelColor.blueComponent, 0.8, accuracy: 0.001)
+        XCTAssertEqual(panelColor.alphaComponent, 0.5, accuracy: 0.001)
+        let glassBackground = try XCTUnwrap(workspace.glassBackgroundView.layer?.backgroundColor)
+        XCTAssertEqual(glassBackground.alpha, 0, accuracy: 0.001)
+        XCTAssertTrue(workspace.glassBackgroundView.effectView.isHidden)
+        XCTAssertTrue(workspace.glassBackgroundView.gradientView.isHidden)
+    }
+
+    func testBorderOverlayIsFrontmostAndCoversContent() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(fixture.workspace.view.subviews.last === fixture.workspace.borderView)
+        XCTAssertEqual(fixture.workspace.borderView.frame, fixture.workspace.view.bounds)
+        XCTAssertNil(fixture.workspace.borderView.hitTest(NSPoint(x: 10, y: 10)))
+        let palette = WorkspaceAppearance.current(appearance: fixture.workspace.view.effectiveAppearance)
+        XCTAssertEqual(fixture.workspace.borderView.strokeLayer?.strokeColor, palette.borderColor.cgColor)
     }
 
     func testDisabledModesLeaveSelectionUnchanged() throws {

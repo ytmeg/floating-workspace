@@ -30,6 +30,10 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     let blankContainer = NSView()
     let statusBar = NSView()
     let glassBackgroundView = GlassBackgroundView()
+    let borderView = GlassBorderView()
+    private(set) var glassAppearanceUpdateCount = 0
+    private var appliedSelectedMode: WorkspaceMode?
+    private var appliedBlankBackground: RGBAColor?
 
     let store: ContentStore
     private weak var windowController: FloatingWindowController?
@@ -65,6 +69,16 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         buildLeftRail()
         buildModeContainer()
         buildStatusBar()
+
+        // Frontmost so the 1 pt edge is not covered by the rail, editor, or status bar backgrounds.
+        borderView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(borderView)
+        NSLayoutConstraint.activate([
+            borderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            borderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            borderView.topAnchor.constraint(equalTo: view.topAnchor),
+            borderView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     public override func viewDidLoad() {
@@ -80,6 +94,13 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
             .sink { [weak self] notification in
                 guard let self, notification.object as? NSPanel === self.windowController?.panel else { return }
                 self.updateBlankSizeFields()
+            }
+            .store(in: &subscriptions)
+        // Reduce Transparency and Increase Contrast can change without an effective-appearance change.
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
+            .sink { [weak self] _ in
+                self?.updateGlassAppearance()
             }
             .store(in: &subscriptions)
     }
@@ -170,11 +191,14 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         noteTextView.autoresizingMask = [.width]
         noteTextView.textContainer?.widthTracksTextView = true
         noteTextView.delegate = self
+        noteTextView.drawsBackground = true
+        noteTextView.textColor = .labelColor
         noteTextView.setAccessibilityIdentifier("note-editor")
 
         noteScrollView.translatesAutoresizingMaskIntoConstraints = false
         noteScrollView.hasVerticalScroller = true
         noteScrollView.borderType = .noBorder
+        noteScrollView.drawsBackground = true
         noteScrollView.documentView = noteTextView
         modeContainer.addSubview(noteScrollView)
 
@@ -241,6 +265,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         view.addSubview(statusBar)
 
         saveStateLabel.font = NSFont.systemFont(ofSize: 13)
+        saveStateLabel.textColor = .labelColor
         saveStateLabel.setAccessibilityIdentifier("save-state")
         let hotkeyHint = NSTextField(labelWithString: "⌃⌥⌘P 切换置顶")
         hotkeyHint.font = NSFont.systemFont(ofSize: 13)
@@ -286,11 +311,13 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         button.target = self
         button.action = action
         button.setAccessibilityIdentifier(identifier)
+        button.contentTintColor = .labelColor
         button.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func configureField(_ field: NSTextField, identifier: String, action: Selector) {
         field.font = NSFont.systemFont(ofSize: 14)
+        field.textColor = .labelColor
         field.target = self
         field.action = action
         field.setAccessibilityIdentifier(identifier)
@@ -310,13 +337,21 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         if blankTitleField.stringValue != content.blankTitle {
             blankTitleField.stringValue = content.blankTitle
         }
-        let background = content.blankBackground
-        colorWell.color = NSColor(
-            srgbRed: background.red,
-            green: background.green,
-            blue: background.blue,
-            alpha: background.alpha
-        )
+        // Note text, pin, title, and save-state emissions arrive per keystroke; only mode and color affect styling.
+        guard content.selectedMode != appliedSelectedMode || content.blankBackground != appliedBlankBackground else {
+            return
+        }
+        if content.blankBackground != appliedBlankBackground {
+            let background = content.blankBackground
+            colorWell.color = NSColor(
+                srgbRed: background.red,
+                green: background.green,
+                blue: background.blue,
+                alpha: background.alpha
+            )
+        }
+        appliedSelectedMode = content.selectedMode
+        appliedBlankBackground = content.blankBackground
 
         noteScrollView.isHidden = content.selectedMode != .note
         blankContainer.isHidden = content.selectedMode != .blank
@@ -329,6 +364,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     }
 
     func updateGlassAppearance(content appliedContent: WorkspaceContent? = nil) {
+        glassAppearanceUpdateCount += 1
         let content = appliedContent ?? store.content
         let palette = WorkspaceAppearance.current(appearance: view.effectiveAppearance)
         let blankColor: NSColor?
@@ -344,24 +380,16 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
             blankColor = nil
         }
         glassBackgroundView.apply(palette, blankColor: blankColor)
+        borderView.apply(palette)
 
         leftRail.layer?.backgroundColor = palette.railBackgroundColor.cgColor
         statusBar.layer?.backgroundColor = palette.contentBackgroundColor.cgColor
-        noteScrollView.drawsBackground = true
         noteScrollView.backgroundColor = palette.contentBackgroundColor
-        noteTextView.drawsBackground = true
         noteTextView.backgroundColor = palette.contentBackgroundColor
-        noteTextView.textColor = .labelColor
         noteTextView.insertionPointColor = palette.accentColor
-        blankTitleField.textColor = .labelColor
-        widthField.textColor = .labelColor
-        heightField.textColor = .labelColor
-        saveStateLabel.textColor = .labelColor
 
         noteButton.contentTintColor = content.selectedMode == .note ? palette.accentColor : .labelColor
         blankButton.contentTintColor = content.selectedMode == .blank ? palette.accentColor : .labelColor
-        imageButton.contentTintColor = .labelColor
-        webButton.contentTintColor = .labelColor
     }
 
     private func apply(_ state: SaveState) {
