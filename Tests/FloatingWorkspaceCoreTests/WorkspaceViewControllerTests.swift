@@ -262,6 +262,29 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.workspace.borderView.strokeLayer?.strokeColor, palette.borderColor.cgColor)
     }
 
+    func testReclickingSelectedNoteToggleKeepsItOn() throws {
+        let fixture = try makeWorkspace()
+        XCTAssertEqual(fixture.workspace.noteButton.state, .on)
+
+        fixture.workspace.noteButton.performClick(nil)
+
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .note)
+        XCTAssertEqual(fixture.workspace.noteButton.state, .on)
+        XCTAssertEqual(fixture.workspace.blankButton.state, .off)
+    }
+
+    func testReclickingSelectedBlankToggleKeepsItOn() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.blank)
+        XCTAssertEqual(fixture.workspace.blankButton.state, .on)
+
+        fixture.workspace.blankButton.performClick(nil)
+
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .blank)
+        XCTAssertEqual(fixture.workspace.blankButton.state, .on)
+        XCTAssertEqual(fixture.workspace.noteButton.state, .off)
+    }
+
     func testDisabledModesLeaveSelectionUnchanged() throws {
         let fixture = try makeWorkspace()
 

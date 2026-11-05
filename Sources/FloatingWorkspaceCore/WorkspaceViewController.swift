@@ -337,6 +337,12 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         if blankTitleField.stringValue != content.blankTitle {
             blankTitleField.stringValue = content.blankTitle
         }
+        // Cheap and idempotent; reset every emission so a re-clicked toggle cannot stay off.
+        noteScrollView.isHidden = content.selectedMode != .note
+        blankContainer.isHidden = content.selectedMode != .blank
+        noteButton.state = content.selectedMode == .note ? .on : .off
+        blankButton.state = content.selectedMode == .blank ? .on : .off
+
         // Note text, pin, title, and save-state emissions arrive per keystroke; only mode and color affect styling.
         guard content.selectedMode != appliedSelectedMode || content.blankBackground != appliedBlankBackground else {
             return
@@ -353,10 +359,6 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         appliedSelectedMode = content.selectedMode
         appliedBlankBackground = content.blankBackground
 
-        noteScrollView.isHidden = content.selectedMode != .note
-        blankContainer.isHidden = content.selectedMode != .blank
-        noteButton.state = content.selectedMode == .note ? .on : .off
-        blankButton.state = content.selectedMode == .blank ? .on : .off
         if content.selectedMode == .blank {
             updateBlankSizeFields()
         }
