@@ -44,7 +44,7 @@ final class GlassBackgroundViewTests: XCTestCase {
 
         view.apply(try makePalette(), blankColor: blankColor)
 
-        XCTAssertFalse(view.effectView.isHidden)
+        XCTAssertTrue(view.effectView.isHidden)
         XCTAssertTrue(view.gradientView.isHidden)
         try assertBackground(view, equals: blankColor)
     }
@@ -63,6 +63,18 @@ final class GlassBackgroundViewTests: XCTestCase {
     func testReapplyingTransparentPaletteRestoresMaterialAndGradient() throws {
         let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
         view.apply(try makePalette(reduceTransparency: true), blankColor: .red)
+
+        view.apply(try makePalette())
+
+        XCTAssertFalse(view.effectView.isHidden)
+        XCTAssertFalse(view.gradientView.isHidden)
+        try assertBackground(view, equals: .clear)
+    }
+
+    func testSwitchingBlankBackToNoteRestoresMaterialAndGradient() throws {
+        let view = GlassBackgroundView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        view.apply(try makePalette(), blankColor: .red)
+        XCTAssertTrue(view.effectView.isHidden)
 
         view.apply(try makePalette())
 

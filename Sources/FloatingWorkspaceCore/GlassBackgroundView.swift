@@ -28,7 +28,7 @@ final class GlassBackgroundView: NSView {
     }
 
     func apply(_ palette: WorkspacePalette, blankColor: NSColor? = nil) {
-        effectView.isHidden = !palette.usesTransparency
+        effectView.isHidden = !palette.usesTransparency || blankColor != nil
         gradientView.isHidden = !palette.usesTransparency || blankColor != nil
         gradientView.colors = palette.gradientColors
 
