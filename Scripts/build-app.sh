@@ -2,6 +2,18 @@
 set -euo pipefail
 ROOT="${0:A:h:h}"
 cd "$ROOT"
+: ${DEVELOPER_DIR:=/Applications/Xcode.app/Contents/Developer}; export DEVELOPER_DIR
+
+ICON_MODE=()
+case "${1:-}" in
+  "") ;;
+  # Intentional regeneration only; the default build must never rewrite committed resources.
+  --update) ICON_MODE=(--update) ;;
+  *)
+    printf 'Usage: %s [--update]\n' "${0:t}" >&2
+    exit 2
+    ;;
+esac
 
 APP_ICON_DIR="$ROOT/Resources/Assets.xcassets/AppIcon.appiconset"
 MENU_ICON_DIR="$ROOT/Resources/Assets.xcassets/MenuBarTemplate.imageset"
@@ -45,20 +57,21 @@ validate_resources() {
   done
 }
 
-# Reject incomplete committed resources, then verify the regenerated output too.
+# Reject incomplete committed resources, then fail on any byte drift from a temporary regeneration.
+if (( ${#ICON_MODE} )); then
+  zsh "$ROOT/Scripts/check-icon-resources.sh" "${ICON_MODE[@]}"
+fi
 validate_resources
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift \
-  "$ROOT/Scripts/generate-icons.swift" "$ROOT/Resources/Assets.xcassets"
-validate_resources
+zsh "$ROOT/Scripts/check-icon-resources.sh"
 
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift build -c release --product FloatingWorkspace
+xcrun swift build -c release --product FloatingWorkspace
 APP="$ROOT/dist/FloatingWorkspace.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/release/FloatingWorkspace" "$APP/Contents/MacOS/FloatingWorkspace"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 chmod +x "$APP/Contents/MacOS/FloatingWorkspace"
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun actool \
+xcrun actool \
   --app-icon AppIcon \
   --platform macosx \
   --minimum-deployment-target 13.0 \

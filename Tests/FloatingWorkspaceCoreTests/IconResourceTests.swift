@@ -38,9 +38,14 @@ final class IconResourceTests: XCTestCase {
         catalogURL.appendingPathComponent("AppIcon.appiconset")
     }
 
-    override func setUp() {
-        super.setUp()
-        XCTAssertEqual(runGenerator(), 0, "generate-icons.swift must complete successfully")
+    private var temporaryURLs: [URL] = []
+
+    override func tearDown() {
+        for url in temporaryURLs {
+            try? FileManager.default.removeItem(at: url)
+        }
+        temporaryURLs = []
+        super.tearDown()
     }
 
     func testAppIconPNGsAndManifestCoverEverySizeInLightAndDark() throws {
@@ -156,33 +161,125 @@ final class IconResourceTests: XCTestCase {
         XCTAssertEqual(plist?["CFBundleIconName"] as? String, "AppIcon")
     }
 
-    func testRepeatedGenerationProducesIdenticalResourceBytes() throws {
-        let before = try resourceBytes()
-        XCTAssertFalse(before.isEmpty)
-        XCTAssertEqual(runGenerator(), 0, "generate-icons.swift must complete successfully on repeated runs")
-        XCTAssertEqual(try resourceBytes(), before)
+    func testGeneratedResourcesMatchCommittedBytesWithoutRewritingThem() throws {
+        let committedBefore = try resourceBytes(in: catalogURL)
+        let modifiedBefore = try modificationDates(in: catalogURL)
+        let generatedURL = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+
+        XCTAssertEqual(runGenerator(outputURL: generatedURL), 0, "generate-icons.swift must complete successfully")
+
+        let generated = try resourceBytes(in: generatedURL)
+        XCTAssertEqual(Set(generated.keys), Set(committedBefore.keys))
+        for (path, data) in generated {
+            XCTAssertEqual(data, committedBefore[path], "Committed icon resource drifted: \(path)")
+        }
+        XCTAssertEqual(try resourceBytes(in: catalogURL), committedBefore)
+        XCTAssertEqual(try modificationDates(in: catalogURL), modifiedBefore)
     }
 
-    private func runGenerator() -> Int32 {
+    func testRepeatedGenerationProducesIdenticalResourceBytes() throws {
+        let first = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+        let second = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+
+        XCTAssertEqual(runGenerator(outputURL: first), 0)
+        XCTAssertEqual(runGenerator(outputURL: second), 0)
+
+        let bytes = try resourceBytes(in: first)
+        XCTAssertFalse(bytes.isEmpty)
+        XCTAssertEqual(try resourceBytes(in: second), bytes)
+    }
+
+    func testDriftCheckPassesForCommittedResourcesWithoutRewritingThem() throws {
+        let modifiedBefore = try modificationDates(in: catalogURL)
+        let committedBefore = try resourceBytes(in: catalogURL)
+
+        let result = runDriftCheck(catalogURL: nil)
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(try resourceBytes(in: catalogURL), committedBefore)
+        XCTAssertEqual(try modificationDates(in: catalogURL), modifiedBefore)
+    }
+
+    func testDriftCheckFailsAndNamesTheDriftedFile() throws {
+        let copyURL = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+        try FileManager.default.copyItem(at: catalogURL, to: copyURL)
+        let drifted = copyURL.appendingPathComponent("AppIcon.appiconset/AppIcon-Dark-64.png")
+        var bytes = try Data(contentsOf: drifted)
+        bytes[bytes.count / 2] ^= 0xFF
+        try bytes.write(to: drifted)
+
+        let result = runDriftCheck(catalogURL: copyURL)
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.output.contains("AppIcon.appiconset/AppIcon-Dark-64.png"), result.output)
+        XCTAssertEqual(try Data(contentsOf: drifted), bytes, "check mode must not repair drift")
+    }
+
+    func testDriftCheckFailsForMissingAndUnexpectedFiles() throws {
+        let copyURL = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+        try FileManager.default.copyItem(at: catalogURL, to: copyURL)
+        try FileManager.default.removeItem(at: copyURL.appendingPathComponent("MenuBarTemplate.imageset/MenuBarTemplate-16.png"))
+        try Data([0]).write(to: copyURL.appendingPathComponent("AppIcon.appiconset/Stale.png"))
+
+        let result = runDriftCheck(catalogURL: copyURL)
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.output.contains("MenuBarTemplate.imageset/MenuBarTemplate-16.png"), result.output)
+        XCTAssertTrue(result.output.contains("AppIcon.appiconset/Stale.png"), result.output)
+    }
+
+    func testDriftCheckUpdateModeRegeneratesIntentionally() throws {
+        let copyURL = try temporaryDirectory().appendingPathComponent("Assets.xcassets")
+        try FileManager.default.copyItem(at: catalogURL, to: copyURL)
+        let drifted = copyURL.appendingPathComponent("AppIcon.appiconset/AppIcon-16.png")
+        try Data([0]).write(to: drifted)
+
+        let update = runDriftCheck(catalogURL: copyURL, arguments: ["--update"])
+        XCTAssertEqual(update.status, 0, update.output)
+
+        XCTAssertEqual(try resourceBytes(in: copyURL), try resourceBytes(in: catalogURL))
+        XCTAssertEqual(runDriftCheck(catalogURL: copyURL).status, 0)
+    }
+
+    private func runGenerator(outputURL: URL) -> Int32 {
+        run(["swift", "Scripts/generate-icons.swift", outputURL.path]).status
+    }
+
+    private func runDriftCheck(catalogURL: URL?, arguments: [String] = []) -> (status: Int32, output: String) {
+        var environment = ProcessInfo.processInfo.environment
+        if let catalogURL {
+            environment["ICON_CATALOG"] = catalogURL.path
+        }
+        return run(["zsh", "Scripts/check-icon-resources.sh"] + arguments, environment: environment)
+    }
+
+    private func run(_ arguments: [String], environment: [String: String]? = nil) -> (status: Int32, output: String) {
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.currentDirectoryURL = repositoryURL
-        process.arguments = ["swift", "Scripts/generate-icons.swift", "Resources/Assets.xcassets"]
+        process.arguments = arguments
+        process.environment = environment
         process.standardOutput = output
         process.standardError = output
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
-            XCTFail("Could not launch icon generator: \(error)")
-            return -1
+            XCTFail("Could not launch \(arguments): \(error)")
+            return (-1, "")
         }
-        if process.terminationStatus != 0 {
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            XCTFail(String(decoding: data, as: UTF8.self))
-        }
-        return process.terminationStatus
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let text = String(decoding: data, as: UTF8.self)
+        return (process.terminationStatus, text)
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IconResourceTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        temporaryURLs.append(url)
+        return url
     }
 
     private func jsonObject(at url: URL) throws -> [String: Any] {
@@ -234,23 +331,34 @@ final class IconResourceTests: XCTestCase {
         return pixels
     }
 
-    private func resourceBytes() throws -> [String: Data] {
-        let files = [
-            catalogURL.appendingPathComponent("Contents.json"),
-            appIconURL.appendingPathComponent("Contents.json"),
-            catalogURL.appendingPathComponent("MenuBarTemplate.imageset/Contents.json"),
-        ] + entries.flatMap { entry in
-            [false, true].map { dark in
-                appIconURL.appendingPathComponent("AppIcon\(dark ? "-Dark" : "")-\(entry.pixels).png")
-            }
-        } + [16, 32].map {
-            catalogURL.appendingPathComponent("MenuBarTemplate.imageset/MenuBarTemplate-\($0).png")
-        }
+    private func resourceBytes(in catalog: URL) throws -> [String: Data] {
         var result: [String: Data] = [:]
-        for file in files {
-            let relativePath = file.path.replacingOccurrences(of: repositoryURL.path + "/", with: "")
-            result[relativePath] = try Data(contentsOf: file)
+        for path in try resourcePaths(in: catalog) {
+            result[path] = try Data(contentsOf: catalog.appendingPathComponent(path))
         }
         return result
+    }
+
+    private func modificationDates(in catalog: URL) throws -> [String: Date] {
+        var result: [String: Date] = [:]
+        for path in try resourcePaths(in: catalog) {
+            let values = try catalog.appendingPathComponent(path).resourceValues(forKeys: [.contentModificationDateKey])
+            result[path] = values.contentModificationDate
+        }
+        return result
+    }
+
+    private func resourcePaths(in catalog: URL) throws -> [String] {
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(
+            at: catalog,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        ))
+        let prefix = catalog.resolvingSymlinksInPath().path + "/"
+        return try enumerator.compactMap { item in
+            let url = try XCTUnwrap(item as? URL)
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
+                  url.lastPathComponent != ".DS_Store" else { return nil }
+            return url.resolvingSymlinksInPath().path.replacingOccurrences(of: prefix, with: "")
+        }.sorted()
     }
 }
