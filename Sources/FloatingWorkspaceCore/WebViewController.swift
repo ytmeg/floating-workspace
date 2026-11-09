@@ -23,6 +23,7 @@ public final class WebViewController: NSViewController {
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         updateNavigationButtons()
     }
 
@@ -247,6 +248,29 @@ public final class WebViewController: NSViewController {
     }
 }
 
+extension WebViewController: WKUIDelegate {
+    public func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard let url = navigationAction.request.url else {
+            showError("请输入有效的 http 或 https 链接")
+            return nil
+        }
+        if let message = navigationValidationError(for: url) {
+            showError(message)
+            return nil
+        }
+
+        errorLabel.stringValue = ""
+        statusLabel.stringValue = "正在加载"
+        webView.load(navigationAction.request)
+        return nil
+    }
+}
+
 extension WebViewController: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         statusLabel.stringValue = "正在加载"
@@ -298,27 +322,6 @@ extension WebViewController: WKNavigationDelegate {
             return
         }
         decisionHandler(.allow)
-    }
-
-    public func webView(
-        _ webView: WKWebView,
-        createWebViewWith configuration: WKWebViewConfiguration,
-        for navigationAction: WKNavigationAction,
-        windowFeatures: WKWindowFeatures
-    ) -> WKWebView? {
-        guard let url = navigationAction.request.url else {
-            showError("请输入有效的 http 或 https 链接")
-            return nil
-        }
-        if let message = navigationValidationError(for: url) {
-            showError(message)
-            return nil
-        }
-
-        errorLabel.stringValue = ""
-        statusLabel.stringValue = "正在加载"
-        webView.load(navigationAction.request)
-        return nil
     }
 
     public func webView(

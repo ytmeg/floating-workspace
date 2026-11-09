@@ -68,13 +68,14 @@ final class WebViewControllerTests: XCTestCase {
 
     func testCredentialURLDoesNotCreateRequestOrExposePassword() throws {
         let controller = try makeController()
-        controller.urlField.stringValue = "https://user:s3cr3t@example.com/private"
+        let password = "s3cr3t"
+        controller.urlField.stringValue = "https://user:\(password)@example.com/private"
 
         controller.openURLFromField()
 
         XCTAssertNil(controller.webView.url)
         XCTAssertEqual(controller.errorLabel.stringValue, "链接不能包含用户名或密码")
-        XCTAssertFalse(controller.errorLabel.stringValue.contains("s3cr3t"))
+        XCTAssertFalse(controller.errorLabel.stringValue.contains(password))
     }
 
     func testMalformedURLDoesNotCreateRequest() throws {
@@ -85,6 +86,76 @@ final class WebViewControllerTests: XCTestCase {
 
         XCTAssertNil(controller.webView.url)
         XCTAssertEqual(controller.errorLabel.stringValue, "请输入有效的 http 或 https 链接")
+    }
+
+    func testMalformedAuthorityFieldEntriesDoNotCreateRequestsOrMutateInput() throws {
+        let invalidInputs = [
+            "https:///private",
+            "https://example.com:abc/private",
+            "https://example.com:99999/private",
+            "https://example.com:443:8443/private"
+        ]
+
+        for raw in invalidInputs {
+            let controller = try makeController()
+            controller.urlField.stringValue = raw
+
+            controller.openURLFromField()
+
+            XCTAssertNil(controller.webView.url, raw)
+            XCTAssertEqual(controller.urlField.stringValue, raw, raw)
+            XCTAssertEqual(controller.errorLabel.stringValue, "请输入有效的 http 或 https 链接", raw)
+        }
+    }
+
+    func testDirectLoadRejectsMalformedAuthoritiesWithoutMutatingURL() throws {
+        let invalidInputs = [
+            "https:///private",
+            "https://example.com:99999/private"
+        ]
+
+        for raw in invalidInputs {
+            let url = try XCTUnwrap(URL(string: raw), raw)
+            let controller = try makeController()
+
+            controller.load(url: url)
+
+            XCTAssertNil(controller.webView.url, raw)
+            XCTAssertEqual(url.absoluteString, raw, raw)
+            XCTAssertEqual(controller.urlField.stringValue, "", raw)
+            XCTAssertEqual(controller.errorLabel.stringValue, "请输入有效的 http 或 https 链接", raw)
+        }
+    }
+
+    func testAuthenticationChallengeUsesDefaultHandlingWithoutCredential() throws {
+        let controller = try makeController()
+        let sender = FakeAuthenticationChallengeSender()
+        let protectionSpace = URLProtectionSpace(
+            host: "example.com",
+            port: 443,
+            protocol: "https",
+            realm: nil,
+            authenticationMethod: NSURLAuthenticationMethodServerTrust
+        )
+        let challenge = URLAuthenticationChallenge(
+            protectionSpace: protectionSpace,
+            proposedCredential: nil,
+            previousFailureCount: 1,
+            failureResponse: nil,
+            error: NSError(domain: NSURLErrorDomain, code: NSURLErrorServerCertificateUntrusted),
+            sender: sender
+        )
+        var disposition: URLSession.AuthChallengeDisposition?
+        var credential: URLCredential?
+
+        controller.webView(controller.webView, didReceive: challenge) { completedDisposition, completedCredential in
+            disposition = completedDisposition
+            credential = completedCredential
+        }
+
+        XCTAssertEqual(disposition, .performDefaultHandling)
+        XCTAssertNil(credential)
+        withExtendedLifetime(sender) {}
     }
 
     func testNoBodyShowsVisibleErrorAndDoesNotEnterEditing() throws {
@@ -160,27 +231,18 @@ final class WebViewControllerTests: XCTestCase {
 
     func testNewWindowLinkLoadsBlankDocumentInSameWebView() throws {
         let controller = try makeController()
+        XCTAssertTrue(controller.webView.uiDelegate === controller)
         let firstFinish = expectation(description: "source document finished")
-        let policyReceived = expectation(description: "new-window navigation policy received")
         let secondFinish = expectation(description: "new-window target finished in same web view")
         var finishCount = 0
-        var newWindowAction: WKNavigationAction?
-        let navigationDelegate = NavigationForwardingDelegate(
-            forwarded: controller,
-            didRequestNewWindow: { action, decisionHandler in
-                newWindowAction = action
-                decisionHandler(.cancel)
-                policyReceived.fulfill()
-            },
-            didFinish: {
-                finishCount += 1
-                if finishCount == 1 {
-                    firstFinish.fulfill()
-                } else {
-                    secondFinish.fulfill()
-                }
+        let navigationDelegate = NavigationForwardingDelegate(forwarded: controller) {
+            finishCount += 1
+            if finishCount == 1 {
+                firstFinish.fulfill()
+            } else {
+                secondFinish.fulfill()
             }
-        )
+        }
         controller.webView.navigationDelegate = navigationDelegate
         controller.webView.loadHTMLString(
             "<html><body><a id='new-window' target='_blank' href='about:blank'>open</a></body></html>",
@@ -189,19 +251,9 @@ final class WebViewControllerTests: XCTestCase {
         wait(for: [firstFinish], timeout: 5)
 
         _ = try evaluate("document.getElementById('new-window').click()", in: controller)
-        wait(for: [policyReceived], timeout: 5)
-        let action = try XCTUnwrap(newWindowAction)
-        XCTAssertNil(action.targetFrame)
-
-        let createdWebView = controller.webView(
-            controller.webView,
-            createWebViewWith: controller.webView.configuration,
-            for: action,
-            windowFeatures: WKWindowFeatures()
-        )
         wait(for: [secondFinish], timeout: 5)
 
-        XCTAssertNil(createdWebView)
+        XCTAssertEqual(controller.webView.url?.absoluteString, "about:blank")
         XCTAssertEqual(
             try evaluate("document.getElementById('new-window') === null", in: controller) as? Bool,
             true
@@ -261,19 +313,21 @@ final class WebViewControllerTests: XCTestCase {
     }
 }
 
+private final class FakeAuthenticationChallengeSender: NSObject, URLAuthenticationChallengeSender {
+    func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+    func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+    func cancel(_ challenge: URLAuthenticationChallenge) {}
+    func performDefaultHandling(for challenge: URLAuthenticationChallenge) {}
+    func rejectProtectionSpaceAndContinue(with challenge: URLAuthenticationChallenge) {}
+}
+
 @MainActor
 private final class NavigationForwardingDelegate: NSObject, WKNavigationDelegate {
     private weak var forwarded: WebViewController?
-    private let didRequestNewWindow: ((WKNavigationAction, @escaping (WKNavigationActionPolicy) -> Void) -> Void)?
     private let didFinish: () -> Void
 
-    init(
-        forwarded: WebViewController,
-        didRequestNewWindow: ((WKNavigationAction, @escaping (WKNavigationActionPolicy) -> Void) -> Void)? = nil,
-        didFinish: @escaping () -> Void
-    ) {
+    init(forwarded: WebViewController, didFinish: @escaping () -> Void) {
         self.forwarded = forwarded
-        self.didRequestNewWindow = didRequestNewWindow
         self.didFinish = didFinish
     }
 
@@ -287,11 +341,7 @@ private final class NavigationForwardingDelegate: NSObject, WKNavigationDelegate
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        if navigationAction.targetFrame == nil, let didRequestNewWindow {
-            didRequestNewWindow(navigationAction, decisionHandler)
-        } else {
-            forwarded?.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
-        }
+        forwarded?.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
     }
 }
 
