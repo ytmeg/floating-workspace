@@ -61,10 +61,10 @@ final class WorkspaceFileStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
 
-    func testImageAndWebAreNotEnabledInPhaseOne() {
+    func testWebIsEnabledWhileImageRemainsDisabled() {
         XCTAssertTrue(WorkspaceMode.note.isEnabledInPhase1)
         XCTAssertTrue(WorkspaceMode.blank.isEnabledInPhase1)
+        XCTAssertTrue(WorkspaceMode.web.isEnabledInPhase1)
         XCTAssertFalse(WorkspaceMode.image.isEnabledInPhase1)
-        XCTAssertFalse(WorkspaceMode.web.isEnabledInPhase1)
     }
 }

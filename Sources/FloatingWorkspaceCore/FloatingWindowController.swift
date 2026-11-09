@@ -137,7 +137,7 @@ public final class FloatingWindowController: NSObject {
         pinButton.toolTip = content.isPinned ? "点击取消置顶（⌃⌥⌘P）" : "点击置顶（⌃⌥⌘P）"
 
         switch content.selectedMode {
-        case .note:
+        case .note, .web:
             panel.title = "悬浮工作台"
             panel.backgroundColor = .clear
         case .blank:
@@ -149,7 +149,7 @@ public final class FloatingWindowController: NSObject {
                 blue: color.blue,
                 alpha: color.alpha
             )
-        case .image, .web:
+        case .image:
             break
         }
     }

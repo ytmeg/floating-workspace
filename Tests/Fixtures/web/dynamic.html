@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Floating Workspace 动态验收页</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, sans-serif; }
+    body { margin: 24px; line-height: 1.5; }
+  </style>
+  <script>
+    (() => {
+      const visitKey = 'floating-workspace-dynamic:' + location.search;
+      const revisiting = sessionStorage.getItem(visitKey) === 'visited';
+      if (!revisiting) {
+        sessionStorage.setItem(visitKey, 'visited');
+        return;
+      }
+      document.addEventListener('DOMContentLoaded', () => {
+        // A later document revision removes the body that the saved draft targeted.
+        document.body?.remove();
+      }, { once: true });
+    })();
+  </script>
+</head>
+<body>
+  <main id="original-structure">
+    <h1>动态网页验收</h1>
+    <p id="dynamic-editable-text">首次加载时可编辑这段正文；保存后刷新会改变文档结构。</p>
+  </main>
+</body>
+</html>

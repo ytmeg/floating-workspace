@@ -172,7 +172,7 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertTrue(doubles.store.content.isPinned)
     }
 
-    func testBlankContentUpdatesTitleAndSRGBBackground() throws {
+    func testModeContentUpdatesTitleAndBackground() throws {
         let doubles = try ContentStoreTestDoubles()
         let controller = FloatingWindowController(store: doubles.store)
 
@@ -188,6 +188,16 @@ final class FloatingWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.panel.title, "悬浮工作台")
 
         doubles.store.update { $0.selectedMode = .note }
+        XCTAssertEqual(controller.panel.backgroundColor, .clear)
+
+        doubles.store.update {
+            $0.selectedMode = .blank
+            $0.blankTitle = "切回网页前"
+            $0.blankBackground = RGBAColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.8)
+        }
+        doubles.store.update { $0.selectedMode = .web }
+
+        XCTAssertEqual(controller.panel.title, "悬浮工作台")
         XCTAssertEqual(controller.panel.backgroundColor, .clear)
     }
 

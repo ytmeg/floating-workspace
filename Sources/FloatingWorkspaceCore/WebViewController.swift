@@ -211,32 +211,42 @@ public final class WebViewController: NSViewController {
         urlField.action = #selector(openURLFromField)
         urlField.setAccessibilityIdentifier("web-url")
 
-        let toolbar = NSStackView(views: [
+        let navigationToolbar = NSStackView(views: [
             backButton,
             forwardButton,
             refreshButton,
-            urlField,
-            openButton,
             editButton
         ])
-        toolbar.orientation = .horizontal
-        toolbar.alignment = .centerY
-        toolbar.spacing = 8
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(toolbar)
+        navigationToolbar.orientation = .horizontal
+        navigationToolbar.alignment = .centerY
+        navigationToolbar.distribution = .equalSpacing
+        navigationToolbar.spacing = 8
+        navigationToolbar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(navigationToolbar)
+
+        let addressToolbar = NSStackView(views: [urlField, openButton])
+        addressToolbar.orientation = .horizontal
+        addressToolbar.alignment = .centerY
+        addressToolbar.spacing = 8
+        addressToolbar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(addressToolbar)
 
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
 
         NSLayoutConstraint.activate([
-            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            toolbar.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            toolbar.heightAnchor.constraint(equalToConstant: 32),
+            navigationToolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            navigationToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            navigationToolbar.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            navigationToolbar.heightAnchor.constraint(equalToConstant: 32),
+            addressToolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            addressToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            addressToolbar.topAnchor.constraint(equalTo: navigationToolbar.bottomAnchor, constant: 8),
+            addressToolbar.heightAnchor.constraint(equalToConstant: 32),
             urlField.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 8)
+            webView.topAnchor.constraint(equalTo: addressToolbar.bottomAnchor, constant: 8)
         ])
     }
 

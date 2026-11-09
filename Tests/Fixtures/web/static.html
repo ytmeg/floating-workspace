@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="3600; url=static.html?refreshed=1">
+  <title>Floating Workspace 静态验收页</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, sans-serif; }
+    body { margin: 24px; line-height: 1.5; }
+    section { margin-block: 16px; }
+  </style>
+</head>
+<body>
+  <h1>静态网页验收</h1>
+  <p id="editable-text">这段正文可在网页模式中编辑。</p>
+  <p><a id="navigation-link" href="static.html?destination=navigation">导航到同一 fixture 的另一 URL</a></p>
+  <output id="session-state">session-uninitialized</output>
+
+  <section aria-label="主动内容清理 fixture">
+    <h2>主动内容清理 fixture</h2>
+    <a id="javascript-link" href="javascript:document.body.dataset.javascriptExecuted='yes'">javascript 链接</a>
+    <button id="event-button" type="button" onclick="document.body.dataset.onclickExecuted='yes'">事件属性按钮</button>
+    <form id="active-form" action="/remote-write-must-not-happen" method="post">
+      <input id="password-input" type="password" value="fixture-password-not-a-credential">
+      <textarea id="form-textarea">fixture-form-value</textarea>
+      <button id="submit-button" type="submit" formaction="/formaction-must-not-survive" formmethod="post">提交</button>
+    </form>
+    <iframe id="active-iframe" src="about:blank" title="iframe fixture"></iframe>
+    <object id="active-object" data="about:blank" type="text/html"></object>
+    <embed id="active-embed" src="about:blank" type="text/html">
+  </section>
+
+  <script>
+    (() => {
+      const sessionKey = 'floating-workspace-acceptance-session';
+      const hadSession = sessionStorage.getItem(sessionKey) === 'present' ||
+        document.cookie.split(';').some(value => value.trim() === 'floating_workspace_session=present');
+      document.getElementById('session-state').textContent = hadSession ? 'session-present' : 'session-absent';
+      sessionStorage.setItem(sessionKey, 'present');
+      document.cookie = 'floating_workspace_session=present; path=/';
+      document.body.dataset.scriptExecuted = 'yes';
+    })();
+  </script>
+</body>
+</html>

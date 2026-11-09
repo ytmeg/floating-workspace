@@ -4,7 +4,11 @@ import FloatingWorkspaceCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: ContentStore?
     var windowController: FloatingWindowController?
-    var workspaceViewController: WorkspaceViewController?
+    @MainActor var workspaceViewController: WorkspaceViewController? {
+        didSet {
+            webViewController = workspaceViewController?.webViewController
+        }
+    }
     var webViewController: WebViewController?
     var menuBarController: MenuBarController?
     var applicationIconController: ApplicationIconController?

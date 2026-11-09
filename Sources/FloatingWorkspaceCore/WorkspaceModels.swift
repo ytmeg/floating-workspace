@@ -4,7 +4,7 @@ public enum WorkspaceMode: String, Codable, Sendable, CaseIterable {
     case note, image, web, blank
 
     public var isEnabledInPhase1: Bool {
-        self == .note || self == .blank
+        self == .note || self == .web || self == .blank
     }
 }
 

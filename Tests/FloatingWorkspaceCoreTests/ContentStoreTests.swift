@@ -40,26 +40,44 @@ final class ContentStoreTests: XCTestCase {
         }
     }
 
-    func testDisabledPersistedModesOpenAsNoteWithoutSaving() throws {
-        for mode in [WorkspaceMode.image, .web] {
-            var persisted = WorkspaceContent.default
-            persisted.selectedMode = mode
-            persisted.noteText = "保留正文"
-            let scheduler = ManualSaveScheduler()
-            let saver = ControlledWorkspaceSaver()
+    func testDisabledPersistedImageModeOpensAsNoteWithoutSaving() throws {
+        var persisted = WorkspaceContent.default
+        persisted.selectedMode = .image
+        persisted.noteText = "保留正文"
+        let scheduler = ManualSaveScheduler()
+        let saver = ControlledWorkspaceSaver()
 
-            let store = try ContentStore(
-                loader: FakeWorkspaceLoader(content: persisted),
-                scheduler: scheduler,
-                saver: saver
-            )
+        let store = try ContentStore(
+            loader: FakeWorkspaceLoader(content: persisted),
+            scheduler: scheduler,
+            saver: saver
+        )
 
-            XCTAssertEqual(store.content.selectedMode, .note)
-            XCTAssertEqual(store.content.noteText, "保留正文")
-            XCTAssertFalse(store.isDirty)
-            XCTAssertTrue(scheduler.delays.isEmpty)
-            XCTAssertTrue(saver.snapshots.isEmpty)
-        }
+        XCTAssertEqual(store.content.selectedMode, .note)
+        XCTAssertEqual(store.content.noteText, "保留正文")
+        XCTAssertFalse(store.isDirty)
+        XCTAssertTrue(scheduler.delays.isEmpty)
+        XCTAssertTrue(saver.snapshots.isEmpty)
+    }
+
+    func testPersistedWebModeOpensAsWebWithoutSaving() throws {
+        var persisted = WorkspaceContent.default
+        persisted.selectedMode = .web
+        persisted.noteText = "保留正文"
+        let scheduler = ManualSaveScheduler()
+        let saver = ControlledWorkspaceSaver()
+
+        let store = try ContentStore(
+            loader: FakeWorkspaceLoader(content: persisted),
+            scheduler: scheduler,
+            saver: saver
+        )
+
+        XCTAssertEqual(store.content.selectedMode, .web)
+        XCTAssertEqual(store.content.noteText, "保留正文")
+        XCTAssertFalse(store.isDirty)
+        XCTAssertTrue(scheduler.delays.isEmpty)
+        XCTAssertTrue(saver.snapshots.isEmpty)
     }
 
     func testDisabledPersistedModeLeavesStoredFileUntouchedUntilNextSave() throws {
@@ -68,7 +86,7 @@ final class ContentStoreTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("workspace-v1.json")
         var persisted = WorkspaceContent.default
-        persisted.selectedMode = .web
+        persisted.selectedMode = .image
         try WorkspaceFileStore(fileURL: file).save(persisted)
         let original = try Data(contentsOf: file)
 

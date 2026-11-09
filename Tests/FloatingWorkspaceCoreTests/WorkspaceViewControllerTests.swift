@@ -22,7 +22,7 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertTrue(fixture.workspace.noteButton.isEnabled)
         XCTAssertTrue(fixture.workspace.blankButton.isEnabled)
         XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
-        XCTAssertFalse(fixture.workspace.webButton.isEnabled)
+        XCTAssertTrue(fixture.workspace.webButton.isEnabled)
         XCTAssertTrue(fixture.workspace.noteButton.isBordered)
         XCTAssertTrue(fixture.workspace.imageButton.isBordered)
         XCTAssertTrue(fixture.workspace.webButton.isBordered)
@@ -83,7 +83,7 @@ final class WorkspaceViewControllerTests: XCTestCase {
             XCTAssertEqual(button.frame.height, 44, accuracy: 0.001)
         }
         XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
-        XCTAssertFalse(fixture.workspace.webButton.isEnabled)
+        XCTAssertTrue(fixture.workspace.webButton.isEnabled)
         XCTAssertEqual(fixture.workspace.noteButton.contentTintColor, palette.accentColor)
         XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, .labelColor)
 
@@ -91,6 +91,11 @@ final class WorkspaceViewControllerTests: XCTestCase {
 
         XCTAssertEqual(fixture.workspace.noteButton.contentTintColor, .labelColor)
         XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, palette.accentColor)
+
+        fixture.workspace.selectMode(.web)
+
+        XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, .labelColor)
+        XCTAssertEqual(fixture.workspace.webButton.contentTintColor, palette.accentColor)
     }
 
     func testAppearanceChangesRefreshPaletteWithoutChangingOrSavingContent() throws {
@@ -127,7 +132,6 @@ final class WorkspaceViewControllerTests: XCTestCase {
             XCTAssertEqual(workspace.noteTextView.string, "保留正文")
             XCTAssertEqual(store.content.selectedMode, .note)
             workspace.selectMode(.image)
-            workspace.selectMode(.web)
             XCTAssertEqual(store.content.selectedMode, .note)
             XCTAssertTrue(store.content.isPinned)
         }
@@ -285,13 +289,69 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.workspace.noteButton.state, .off)
     }
 
-    func testDisabledModesLeaveSelectionUnchanged() throws {
+    func testDisabledImageModeLeavesWebSelectionUnchanged() throws {
         let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.web)
 
         fixture.workspace.selectMode(.image)
-        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .note)
+
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .web)
+        XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
+    }
+
+    func testWebModeInstallsOneBrowserAndUpdatesVisibleContainer() throws {
+        let fixture = try makeWorkspace()
+        let browser = fixture.workspace.webViewController
+        XCTAssertTrue(fixture.workspace.children.contains { $0 === browser })
+        XCTAssertTrue(browser.view.isDescendant(of: fixture.workspace.webContainer))
+        XCTAssertTrue(fixture.workspace.webContainer.isHidden)
+
         fixture.workspace.selectMode(.web)
-        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .note)
+
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .web)
+        XCTAssertFalse(fixture.workspace.webContainer.isHidden)
+        XCTAssertTrue(fixture.workspace.noteScrollView.isHidden)
+        XCTAssertTrue(fixture.workspace.blankContainer.isHidden)
+        XCTAssertEqual(fixture.workspace.webButton.state, .on)
+        XCTAssertEqual(fixture.workspace.noteButton.state, .off)
+        XCTAssertEqual(fixture.workspace.blankButton.state, .off)
+
+        fixture.workspace.selectMode(.blank)
+        XCTAssertTrue(fixture.workspace.webContainer.isHidden)
+        fixture.workspace.selectMode(.web)
+        XCTAssertTrue(fixture.workspace.webViewController === browser)
+        XCTAssertFalse(fixture.workspace.webContainer.isHidden)
+    }
+
+    func testReclickingSelectedWebToggleKeepsItOn() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.web)
+        XCTAssertEqual(fixture.workspace.webButton.state, .on)
+
+        fixture.workspace.webButton.performClick(nil)
+
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .web)
+        XCTAssertEqual(fixture.workspace.webButton.state, .on)
+        XCTAssertFalse(fixture.workspace.webContainer.isHidden)
+    }
+
+    func testWebDraftEmissionsStayVisibleWithoutRestyling() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.web)
+        let updates = fixture.workspace.glassAppearanceUpdateCount
+        let invalidations = fixture.workspace.glassBackgroundView.gradientView.invalidationCount
+        let drafts = WebDraftStore(store: fixture.doubles.store)
+
+        try drafts.saveDraft(WebDraft(
+            url: "https://example.com/",
+            sanitizedBodyHTML: "<p>draft</p>",
+            updatedAt: Date(timeIntervalSince1970: 1)
+        ))
+
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates)
+        XCTAssertEqual(fixture.workspace.glassBackgroundView.gradientView.invalidationCount, invalidations)
+        XCTAssertEqual(fixture.workspace.webButton.state, .on)
+        XCTAssertFalse(fixture.workspace.webContainer.isHidden)
     }
 
     func testSelectingBlankAndNoteModesUpdatesVisibleEditor() throws {

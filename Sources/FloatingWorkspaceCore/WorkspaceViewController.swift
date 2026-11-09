@@ -28,6 +28,8 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     let modeContainer = NSView()
     let noteScrollView = NSScrollView()
     let blankContainer = NSView()
+    let webContainer = NSView()
+    public let webViewController: WebViewController
     let statusBar = NSView()
     let glassBackgroundView = GlassBackgroundView()
     let borderView = GlassBorderView()
@@ -41,6 +43,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
 
     public init(store: ContentStore, windowController: FloatingWindowController) {
         self.store = store
+        self.webViewController = WebViewController(store: WebDraftStore(store: store))
         self.windowController = windowController
         super.init(nibName: nil, bundle: nil)
     }
@@ -150,7 +153,6 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         configureModeButton(webButton, title: "网页", symbolName: "globe", identifier: "mode-web", action: #selector(webModeSelected))
         configureModeButton(blankButton, title: "空白", symbolName: "square", identifier: "mode-blank", action: #selector(blankModeSelected))
         imageButton.isEnabled = false
-        webButton.isEnabled = false
 
         let stack = NSStackView(views: [noteButton, imageButton, webButton, blankButton])
         stack.orientation = .vertical
@@ -206,6 +208,12 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         modeContainer.addSubview(blankContainer)
         buildBlankControls()
 
+        webContainer.translatesAutoresizingMaskIntoConstraints = false
+        modeContainer.addSubview(webContainer)
+        addChild(webViewController)
+        webViewController.view.translatesAutoresizingMaskIntoConstraints = false
+        webContainer.addSubview(webViewController.view)
+
         NSLayoutConstraint.activate([
             noteScrollView.leadingAnchor.constraint(equalTo: modeContainer.leadingAnchor),
             noteScrollView.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
@@ -214,7 +222,15 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
             blankContainer.leadingAnchor.constraint(equalTo: modeContainer.leadingAnchor),
             blankContainer.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
             blankContainer.topAnchor.constraint(equalTo: modeContainer.topAnchor),
-            blankContainer.bottomAnchor.constraint(equalTo: modeContainer.bottomAnchor)
+            blankContainer.bottomAnchor.constraint(equalTo: modeContainer.bottomAnchor),
+            webContainer.leadingAnchor.constraint(equalTo: modeContainer.leadingAnchor),
+            webContainer.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
+            webContainer.topAnchor.constraint(equalTo: modeContainer.topAnchor),
+            webContainer.bottomAnchor.constraint(equalTo: modeContainer.bottomAnchor),
+            webViewController.view.leadingAnchor.constraint(equalTo: webContainer.leadingAnchor),
+            webViewController.view.trailingAnchor.constraint(equalTo: webContainer.trailingAnchor),
+            webViewController.view.topAnchor.constraint(equalTo: webContainer.topAnchor),
+            webViewController.view.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor)
         ])
     }
 
@@ -340,8 +356,11 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         // Cheap and idempotent; reset every emission so a re-clicked toggle cannot stay off.
         noteScrollView.isHidden = content.selectedMode != .note
         blankContainer.isHidden = content.selectedMode != .blank
+        webContainer.isHidden = content.selectedMode != .web
         noteButton.state = content.selectedMode == .note ? .on : .off
         blankButton.state = content.selectedMode == .blank ? .on : .off
+        webButton.isEnabled = WorkspaceMode.web.isEnabledInPhase1
+        webButton.state = content.selectedMode == .web ? .on : .off
 
         // Note text, pin, title, and save-state emissions arrive per keystroke; only mode and color affect styling.
         guard content.selectedMode != appliedSelectedMode || content.blankBackground != appliedBlankBackground else {
@@ -392,6 +411,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
 
         noteButton.contentTintColor = content.selectedMode == .note ? palette.accentColor : .labelColor
         blankButton.contentTintColor = content.selectedMode == .blank ? palette.accentColor : .labelColor
+        webButton.contentTintColor = content.selectedMode == .web ? palette.accentColor : .labelColor
     }
 
     private func apply(_ state: SaveState) {

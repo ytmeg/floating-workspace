@@ -76,6 +76,17 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertTrue(fixture.saver.snapshots.isEmpty)
     }
 
+    func testInstallingWorkspaceConnectsEmbeddedWebController() throws {
+        let fixture = try makeFixture()
+        let window = FloatingWindowController(store: fixture.store)
+        let workspace = try XCTUnwrap(window.panel.contentViewController as? WorkspaceViewController)
+        let delegate = AppDelegate()
+
+        delegate.workspaceViewController = workspace
+
+        XCTAssertTrue(delegate.webViewController === workspace.webViewController)
+    }
+
     func testDirtyStoreWaitsForSuccessfulFlushBeforeTermination() throws {
         let fixture = try makeFixture()
         let delegate = AppDelegate()
