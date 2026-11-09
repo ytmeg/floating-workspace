@@ -29,20 +29,62 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
     public var blankTitle: String
     public var blankBackground: RGBAColor
     public var isPinned: Bool
+    public var webDrafts: [String: WebDraft]
 
     public static let `default` = WorkspaceContent(
-        schemaVersion: 1,
+        schemaVersion: 2,
         selectedMode: .note,
         noteText: "",
         blankTitle: "空白窗口",
         blankBackground: RGBAColor(red: 0.96, green: 0.97, blue: 0.98, alpha: 1),
-        isPinned: true
+        isPinned: true,
+        webDrafts: [:]
     )
+
+    public init(
+        schemaVersion: Int,
+        selectedMode: WorkspaceMode,
+        noteText: String,
+        blankTitle: String,
+        blankBackground: RGBAColor,
+        isPinned: Bool,
+        webDrafts: [String: WebDraft] = [:]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.selectedMode = selectedMode
+        self.noteText = noteText
+        self.blankTitle = blankTitle
+        self.blankBackground = blankBackground
+        self.isPinned = isPinned
+        self.webDrafts = webDrafts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, selectedMode, noteText, blankTitle, blankBackground, isPinned, webDrafts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        selectedMode = try container.decode(WorkspaceMode.self, forKey: .selectedMode)
+        noteText = try container.decode(String.self, forKey: .noteText)
+        blankTitle = try container.decode(String.self, forKey: .blankTitle)
+        blankBackground = try container.decode(RGBAColor.self, forKey: .blankBackground)
+        isPinned = try container.decode(Bool.self, forKey: .isPinned)
+        webDrafts = try container.decodeIfPresent([String: WebDraft].self, forKey: .webDrafts) ?? [:]
+    }
 }
 
 public struct WorkspaceLoadResult: Equatable, Sendable {
     public let content: WorkspaceContent
     public let recoveryURL: URL?
+    public let migrationBackupURL: URL?
+
+    public init(content: WorkspaceContent, recoveryURL: URL?, migrationBackupURL: URL? = nil) {
+        self.content = content
+        self.recoveryURL = recoveryURL
+        self.migrationBackupURL = migrationBackupURL
+    }
 }
 
 public enum SaveState: Equatable, Sendable {
