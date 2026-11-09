@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: ContentStore?
     var windowController: FloatingWindowController?
     var workspaceViewController: WorkspaceViewController?
+    var webViewController: WebViewController?
     var menuBarController: MenuBarController?
     var applicationIconController: ApplicationIconController?
     var hotkeyController: HotkeyController?
@@ -59,11 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store else { return .terminateNow }
-        guard !store.isDirty && !store.isSaving else {
-            flushForTermination(using: store)
-            return .terminateLater
-        }
-        return .terminateNow
+        let needsDraftFlush = webViewController?.needsDraftFlush ?? false
+        guard needsDraftFlush || store.isDirty || store.isSaving else { return .terminateNow }
+        flushForTermination(using: store)
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -108,6 +108,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func flushForTermination(using store: ContentStore) {
+        guard let webViewController else {
+            flushContentStoreForTermination(using: store)
+            return
+        }
+        webViewController.flushDraft { result in
+            switch result {
+            case .success:
+                self.flushContentStoreForTermination(using: store)
+            case .failure:
+                self.presentTerminationSaveFailure()
+            }
+        }
+    }
+
+    @MainActor
+    private func flushContentStoreForTermination(using store: ContentStore) {
         store.flush { result in
             switch result {
             case .success:

@@ -15,6 +15,15 @@ public final class WebViewController: NSViewController {
     public let statusLabel = NSTextField(labelWithString: "")
     public let errorLabel = NSTextField(labelWithString: "")
     public private(set) var isEditing = false
+    public var needsDraftFlush: Bool {
+        hasPendingDraftChanges || isFlushingDraft
+    }
+    private var hasPendingDraftChanges = false
+    private var isFlushingDraft = false
+    private var draftFlushCompletions: [(Result<Void, Error>) -> Void] = []
+    private var replayAttempted = false
+    private var navigationGeneration = 0
+    private var currentDocumentURL: URL?
 
     public init(store: WebDraftStore) {
         self.store = store
@@ -22,6 +31,10 @@ public final class WebViewController: NSViewController {
         configuration.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
+        configuration.userContentController.add(
+            WeakWebDraftMessageHandler(delegate: self),
+            name: WebDraftSanitizer.messageHandlerName
+        )
         webView.navigationDelegate = self
         webView.uiDelegate = self
         updateNavigationButtons()
@@ -48,6 +61,9 @@ public final class WebViewController: NSViewController {
         errorLabel.stringValue = ""
         urlField.stringValue = url.absoluteString
         statusLabel.stringValue = "正在加载"
+        if currentDocumentURL == nil {
+            currentDocumentURL = webView.url
+        }
         webView.load(URLRequest(url: url))
     }
 
@@ -66,7 +82,7 @@ public final class WebViewController: NSViewController {
         updateEditButton()
         errorLabel.stringValue = ""
 
-        webView.evaluateJavaScript(editingScript(enabled: requestedState)) { [weak self] result, error in
+        webView.evaluateJavaScript(WebDraftSanitizer.setEditing(enabled: requestedState)) { [weak self] result, error in
             guard let self else { return }
             if let error {
                 self.isEditing = !requestedState
@@ -88,11 +104,83 @@ public final class WebViewController: NSViewController {
                 return
             }
             self.errorLabel.stringValue = ""
+            self.hasPendingDraftChanges = true
+            if !requestedState {
+                self.flushDraft { (_: Result<Void, Error>) in }
+            }
         }
     }
 
     public func flushDraft(completion: @escaping () -> Void) {
-        completion()
+        flushDraft { (_: Result<Void, Error>) in
+            completion()
+        }
+    }
+
+    public func flushDraft(completion: @escaping (Result<Void, Error>) -> Void) {
+        flushDraft(sourceURL: currentDocumentURL ?? webView.url, completion: completion)
+    }
+
+    private func flushDraft(sourceURL: URL?, completion: @escaping (Result<Void, Error>) -> Void) {
+        draftFlushCompletions.append(completion)
+        guard !isFlushingDraft else { return }
+        guard hasPendingDraftChanges else {
+            completeDraftFlush(with: .success(()))
+            return
+        }
+        guard let url = sourceURL,
+              let normalizedURL = try? WebDraftKey.normalized(url) else {
+            completeDraftFlush(with: .success(()))
+            return
+        }
+
+        isFlushingDraft = true
+        webView.evaluateJavaScript(WebDraftSanitizer.sanitizeBody()) { [weak self] result, error in
+            guard let self else { return }
+            if let error {
+                self.completeDraftFlush(with: .failure(error))
+                return
+            }
+            guard let result = result as? [String: Any],
+                  let succeeded = result["ok"] as? Bool,
+                  succeeded,
+                  let html = result["html"] as? String else {
+                self.completeDraftFlush(with: .failure(Self.draftError("页面没有可保存的正文")))
+                return
+            }
+
+            do {
+                try self.store.saveDraft(WebDraft(
+                    url: normalizedURL,
+                    sanitizedBodyHTML: html,
+                    updatedAt: Date()
+                ))
+                self.completeDraftFlush(with: .success(()))
+            } catch {
+                self.completeDraftFlush(with: .failure(error))
+            }
+        }
+    }
+
+    private func completeDraftFlush(with result: Result<Void, Error>) {
+        isFlushingDraft = false
+        switch result {
+        case .success:
+            hasPendingDraftChanges = false
+        case .failure(let error):
+            showError("无法保存网页草稿：\(error.localizedDescription)")
+        }
+        let completions = draftFlushCompletions
+        draftFlushCompletions.removeAll()
+        completions.forEach { $0(result) }
+    }
+
+    private static func draftError(_ message: String) -> NSError {
+        NSError(
+            domain: "WebViewController",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
     }
 
     private func configureToolbar() {
@@ -197,35 +285,6 @@ public final class WebViewController: NSViewController {
         }
     }
 
-    private func editingScript(enabled: Bool) -> String {
-        """
-        (() => {
-            const body = document.body;
-            if (!body) {
-                return { ok: false, reason: 'no-body' };
-            }
-            const handlerKey = '__floatingWorkspaceWebModeSubmitInterceptor';
-            if (\(enabled)) {
-                body.contentEditable = 'true';
-                if (!window[handlerKey]) {
-                    window[handlerKey] = event => {
-                        event.preventDefault();
-                        event.stopImmediatePropagation();
-                    };
-                    document.addEventListener('submit', window[handlerKey], true);
-                }
-            } else {
-                body.contentEditable = 'false';
-                if (window[handlerKey]) {
-                    document.removeEventListener('submit', window[handlerKey], true);
-                    delete window[handlerKey];
-                }
-            }
-            return { ok: true, contentEditable: body.contentEditable };
-        })()
-        """
-    }
-
     private func updateNavigationButtons() {
         backButton.isEnabled = webView.canGoBack
         forwardButton.isEnabled = webView.canGoForward
@@ -273,12 +332,18 @@ extension WebViewController: WKUIDelegate {
 
 extension WebViewController: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        navigationGeneration += 1
+        replayAttempted = false
+        isEditing = false
+        hasPendingDraftChanges = false
+        updateEditButton()
         statusLabel.stringValue = "正在加载"
         errorLabel.stringValue = ""
         updateNavigationButtons()
     }
 
     public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        currentDocumentURL = webView.url
         if let url = webView.url {
             urlField.stringValue = url.absoluteString
         }
@@ -286,12 +351,39 @@ extension WebViewController: WKNavigationDelegate {
     }
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        currentDocumentURL = webView.url
         statusLabel.stringValue = "加载完成"
         errorLabel.stringValue = ""
         if let url = webView.url {
             urlField.stringValue = url.absoluteString
         }
         updateNavigationButtons()
+        replayDraftIfNeeded()
+    }
+
+    private func replayDraftIfNeeded() {
+        guard !replayAttempted else { return }
+        replayAttempted = true
+        guard let url = webView.url,
+              let draft = try? store.draft(for: url) else {
+            return
+        }
+        let generation = navigationGeneration
+        webView.evaluateJavaScript(WebDraftSanitizer.applySanitizedBody(draft.sanitizedBodyHTML)) { [weak self] result, error in
+            guard let self, generation == self.navigationGeneration else { return }
+            if error != nil {
+                self.showError("无法应用上次修改")
+                return
+            }
+            guard let result = result as? [String: Any],
+                  let succeeded = result["ok"] as? Bool,
+                  succeeded else {
+                self.showError("无法应用上次修改")
+                return
+            }
+            self.statusLabel.stringValue = "已恢复上次修改"
+            self.errorLabel.stringValue = ""
+        }
     }
 
     public func webView(
@@ -321,7 +413,14 @@ extension WebViewController: WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
-        decisionHandler(.allow)
+        flushDraft(sourceURL: currentDocumentURL ?? webView.url) { result in
+            switch result {
+            case .success:
+                decisionHandler(.allow)
+            case .failure:
+                decisionHandler(.cancel)
+            }
+        }
     }
 
     public func webView(
@@ -357,5 +456,32 @@ extension WebViewController: WKNavigationDelegate {
             showError("网络加载失败：\(error.localizedDescription)")
         }
         updateNavigationButtons()
+    }
+}
+
+extension WebViewController: WKScriptMessageHandler {
+    public func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == WebDraftSanitizer.messageHandlerName, isEditing else { return }
+        hasPendingDraftChanges = true
+        flushDraft { (_: Result<Void, Error>) in }
+    }
+}
+
+@MainActor
+private final class WeakWebDraftMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        delegate?.userContentController(userContentController, didReceive: message)
     }
 }

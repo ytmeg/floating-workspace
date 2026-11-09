@@ -262,7 +262,188 @@ final class WebViewControllerTests: XCTestCase {
         withExtendedLifetime(navigationDelegate) {}
     }
 
-    func testFlushDraftStubCompletesImmediately() throws {
+    func testFlushDraftSanitizesActiveContentAndFormState() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let drafts = WebDraftStore(store: doubles.store)
+        let controller = try makeController(store: drafts)
+        let url = try XCTUnwrap(URL(string: "HTTPS://Example.COM:443/sanitize#section"))
+        _ = try loadHTML(
+            """
+            <html><body>
+            <p id='ordinary' onclick='window.__clicked = true'>ordinary text</p>
+            <script>window.__scriptRan = true</script>
+            <a id='unsafe-link' href='javascript:window.__linkRan = true'>link</a>
+            <iframe src='about:blank'></iframe><object></object><embed>
+            <meta http-equiv='refresh' content='0;url=http://127.0.0.1:9/elsewhere'>
+            <form id='form' action='https://example.com/submit' method='post'>
+            <input id='password' type='password' value='s3cr3t'>
+            <textarea id='note'>private note</textarea>
+            </form>
+            </body></html>
+            """,
+            baseURL: url,
+            in: controller
+        )
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        let flushed = expectation(description: "sanitized draft flushed")
+
+        controller.flushDraft {
+            flushed.fulfill()
+        }
+        wait(for: [flushed], timeout: 2)
+
+        let draft = try XCTUnwrap(try drafts.draft(for: url))
+        let html = draft.sanitizedBodyHTML
+        let lowercaseHTML = html.lowercased()
+        XCTAssertEqual(draft.url, "https://example.com/sanitize")
+        XCTAssertTrue(html.contains("ordinary text"))
+        XCTAssertTrue(html.contains("id='ordinary'") || html.contains("id=\"ordinary\""))
+        XCTAssertFalse(lowercaseHTML.contains("<script"))
+        XCTAssertFalse(lowercaseHTML.contains("<iframe"))
+        XCTAssertFalse(lowercaseHTML.contains("<object"))
+        XCTAssertFalse(lowercaseHTML.contains("<embed"))
+        XCTAssertFalse(lowercaseHTML.contains("http-equiv=\"refresh\""))
+        XCTAssertFalse(lowercaseHTML.contains("http-equiv='refresh'"))
+        XCTAssertFalse(lowercaseHTML.contains("onclick"))
+        XCTAssertFalse(lowercaseHTML.contains("javascript:"))
+        XCTAssertFalse(html.contains("s3cr3t"))
+        XCTAssertFalse(html.contains("private note"))
+        XCTAssertFalse(lowercaseHTML.contains("action="))
+        XCTAssertFalse(lowercaseHTML.contains("method="))
+    }
+
+    func testMutationSavesOnlyAfterEightHundredMillisecondsIdle() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let drafts = WebDraftStore(store: doubles.store)
+        let controller = try makeController(store: drafts)
+        let url = try XCTUnwrap(URL(string: "https://example.com/idle"))
+        _ = try loadHTML("<html><body><p id='text'>original</p></body></html>", baseURL: url, in: controller)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'edited after pause'", in: controller)
+        XCTAssertNil(try drafts.draft(for: url))
+        let earlyCheckpoint = expectation(description: "300ms checkpoint")
+        let saveCheckpoint = expectation(description: "idle save checkpoint")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            XCTAssertNil(try? drafts.draft(for: url))
+            earlyCheckpoint.fulfill()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+            saveCheckpoint.fulfill()
+        }
+
+        wait(for: [earlyCheckpoint, saveCheckpoint], timeout: 2)
+
+        let draft = try XCTUnwrap(try drafts.draft(for: url))
+        XCTAssertTrue(draft.sanitizedBodyHTML.contains("edited after pause"))
+    }
+
+    func testDidFinishReplaysSanitizedDraftOnce() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let drafts = WebDraftStore(store: doubles.store)
+        let url = try XCTUnwrap(URL(string: "https://example.com/replay"))
+        let saved = WebDraft(
+            url: url.absoluteString,
+            sanitizedBodyHTML: "<p id='restored'>restored draft</p><script>window.__replayScript = true</script>",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try drafts.saveDraft(saved)
+        let controller = try makeController(store: drafts)
+        let finished = expectation(description: "page loaded")
+        let navigationDelegate = NavigationForwardingDelegate(forwarded: controller) {
+            finished.fulfill()
+        }
+        controller.webView.navigationDelegate = navigationDelegate
+        let navigation = controller.webView.loadHTMLString(
+            "<html><body><p>remote page</p></body></html>",
+            baseURL: url
+        )
+        wait(for: [finished], timeout: 5)
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "已恢复上次修改"),
+            object: controller.statusLabel
+        )
+        wait(for: [restored], timeout: 2)
+
+        XCTAssertEqual(
+            try evaluate("document.getElementById('restored').textContent", in: controller) as? String,
+            "restored draft"
+        )
+        XCTAssertEqual(try evaluate("document.querySelector('script') === null", in: controller) as? Bool, true)
+        XCTAssertEqual(try evaluate("window.__replayScript === undefined", in: controller) as? Bool, true)
+
+        _ = try evaluate("document.body.innerHTML = '<p>subsequent page change</p>'", in: controller)
+        controller.webView(controller.webView, didFinish: navigation)
+        let replayWindow = expectation(description: "replay window")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            replayWindow.fulfill()
+        }
+        wait(for: [replayWindow], timeout: 1)
+
+        XCTAssertEqual(try evaluate("document.body.textContent", in: controller) as? String, "subsequent page change")
+        XCTAssertEqual(try drafts.draft(for: url), saved)
+        controller.webView.navigationDelegate = nil
+        withExtendedLifetime(navigationDelegate) {}
+    }
+
+    func testReplayFailureReportsErrorAndPreservesDraft() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let drafts = WebDraftStore(store: doubles.store)
+        let url = try XCTUnwrap(URL(string: "https://example.com/replay-error"))
+        let saved = WebDraft(
+            url: url.absoluteString,
+            sanitizedBodyHTML: "<p>keep this draft</p>",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try drafts.saveDraft(saved)
+        let controller = try makeController(store: drafts)
+        let navigation = try loadHTML("<html><body><p>remote page</p></body></html>", baseURL: url, in: controller)
+        _ = try evaluate("document.body.remove()", in: controller)
+
+        controller.webView(controller.webView, didFinish: navigation)
+        let failed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "无法应用上次修改"),
+            object: controller.errorLabel
+        )
+        wait(for: [failed], timeout: 2)
+
+        XCTAssertEqual(try drafts.draft(for: url), saved)
+        XCTAssertNotEqual(controller.statusLabel.stringValue, "已恢复上次修改")
+    }
+
+    func testNavigationFlushesCurrentDraftBeforeProvisionalNavigation() throws {
+        let doubles = try ContentStoreTestDoubles()
+        let drafts = WebDraftStore(store: doubles.store)
+        let controller = try makeController(store: drafts)
+        let currentURL = try XCTUnwrap(URL(string: "https://example.com/current"))
+        _ = try loadHTML("<html><body><p id='text'>original</p></body></html>", baseURL: currentURL, in: controller)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'saved before navigation'", in: controller)
+        let started = expectation(description: "next navigation started")
+        var draftAtNavigationStart: WebDraft?
+        let navigationDelegate = NavigationForwardingDelegate(
+            forwarded: controller,
+            didStart: {
+                draftAtNavigationStart = try? drafts.draft(for: currentURL)
+                started.fulfill()
+            },
+            didFinish: {}
+        )
+        controller.webView.navigationDelegate = navigationDelegate
+
+        controller.load(url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/next")))
+        wait(for: [started], timeout: 5)
+
+        let draft = try XCTUnwrap(draftAtNavigationStart)
+        XCTAssertTrue(draft.sanitizedBodyHTML.contains("saved before navigation"))
+        controller.webView.stopLoading()
+        controller.webView.navigationDelegate = nil
+        withExtendedLifetime(navigationDelegate) {}
+    }
+
+    func testFlushDraftWithoutPendingChangesCompletesImmediately() throws {
         let controller = try makeController()
         var completionCount = 0
 
@@ -277,19 +458,19 @@ final class WebViewControllerTests: XCTestCase {
         WebDraftStore(store: try ContentStoreTestDoubles().store)
     }
 
-    private func makeController() throws -> WebViewController {
-        let controller = WebViewController(store: try makeStore())
+    private func makeController(store: WebDraftStore? = nil) throws -> WebViewController {
+        let controller = WebViewController(store: try store ?? makeStore())
         _ = controller.view
         return controller
     }
 
-    private func loadHTML(_ html: String, in controller: WebViewController) throws -> WKNavigation {
+    private func loadHTML(_ html: String, baseURL: URL? = nil, in controller: WebViewController) throws -> WKNavigation {
         let finished = expectation(description: "local HTML navigation finished")
         let navigationDelegate = LocalNavigationDelegate {
             finished.fulfill()
         }
         controller.webView.navigationDelegate = navigationDelegate
-        let navigation = controller.webView.loadHTMLString(html, baseURL: nil)
+        let navigation = controller.webView.loadHTMLString(html, baseURL: baseURL)
         wait(for: [finished], timeout: 5)
         controller.webView.navigationDelegate = nil
         withExtendedLifetime(navigationDelegate) {}
@@ -324,11 +505,22 @@ private final class FakeAuthenticationChallengeSender: NSObject, URLAuthenticati
 @MainActor
 private final class NavigationForwardingDelegate: NSObject, WKNavigationDelegate {
     private weak var forwarded: WebViewController?
+    private let didStart: (() -> Void)?
     private let didFinish: () -> Void
 
-    init(forwarded: WebViewController, didFinish: @escaping () -> Void) {
+    init(
+        forwarded: WebViewController,
+        didStart: (() -> Void)? = nil,
+        didFinish: @escaping () -> Void
+    ) {
         self.forwarded = forwarded
+        self.didStart = didStart
         self.didFinish = didFinish
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        forwarded?.webView(webView, didStartProvisionalNavigation: navigation)
+        didStart?()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

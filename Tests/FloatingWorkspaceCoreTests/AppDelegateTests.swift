@@ -203,6 +203,49 @@ final class AppDelegateTests: XCTestCase {
         }
     }
 
+    func testTerminationFlushesWebDraftBeforeContentStoreFlush() throws {
+        let fixture = try makeFixture()
+        let delegate = AppDelegate()
+        delegate.store = fixture.store
+        let drafts = WebDraftStore(store: fixture.store)
+        let controller = WebViewController(store: drafts)
+        _ = controller.view
+        let url = try XCTUnwrap(URL(string: "https://example.com/termination"))
+        controller.webView.loadHTMLString(
+            "<html><body><p id='text'>before quit</p></body></html>",
+            baseURL: url
+        )
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "加载完成"),
+            object: controller.statusLabel
+        )
+        wait(for: [loaded], timeout: 5)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'draft saved at quit'", in: controller)
+        delegate.webViewController = controller
+        var replies: [Bool] = []
+        delegate.terminationReplyHandler = { replies.append($0) }
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateLater)
+        let saveDeadline = Date().addingTimeInterval(2)
+        while fixture.saver.snapshots.isEmpty && Date() < saveDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        guard fixture.saver.snapshots.count == 1 else {
+            return XCTFail("Expected exactly one ContentStore save after the web draft flush")
+        }
+        let snapshot = fixture.saver.snapshots[0]
+        let key = "https://example.com/termination"
+        XCTAssertTrue(snapshot.webDrafts[key]?.sanitizedBodyHTML.contains("draft saved at quit") == true)
+        XCTAssertTrue(replies.isEmpty)
+        fixture.saver.completeSuccess(at: 0)
+        drainTerminationQueue()
+        XCTAssertEqual(replies, [true])
+        XCTAssertFalse(fixture.store.isDirty)
+    }
+
     func testApplicationWillTerminateStopsHotkey() throws {
         let delegate = AppDelegate()
         let first = HotkeyController {}
@@ -236,6 +279,22 @@ final class AppDelegateTests: XCTestCase {
             ).path,
             "/dev/null/workspace-v1.json"
         )
+    }
+
+    private func evaluate(_ script: String, in controller: WebViewController) throws -> Any? {
+        let completed = expectation(description: "JavaScript evaluation completed")
+        var result: Any?
+        var evaluationError: Error?
+        controller.webView.evaluateJavaScript(script) { value, error in
+            result = value
+            evaluationError = error
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 5)
+        if let evaluationError {
+            throw evaluationError
+        }
+        return result
     }
 
     private func makeFixture() throws -> (
