@@ -4,6 +4,12 @@ public struct WebDraft: Codable, Equatable, Sendable {
     public let url: String
     public let sanitizedBodyHTML: String
     public let updatedAt: Date
+
+    public init(url: String, sanitizedBodyHTML: String, updatedAt: Date) {
+        self.url = url
+        self.sanitizedBodyHTML = sanitizedBodyHTML
+        self.updatedAt = updatedAt
+    }
 }
 
 public enum WebDraftKey {
@@ -17,12 +23,16 @@ public enum WebDraftKey {
         }
 
         let scheme = rawScheme.lowercased()
-        let host = rawHost.lowercased()
         guard scheme == "http" || scheme == "https",
-              !host.isEmpty,
-              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+              isValidHostname(rawHost) else {
             throw invalidURL()
         }
+        if let port = components.port {
+            guard (0...65535).contains(port) else {
+                throw invalidURL()
+            }
+        }
+        let host = rawHost.lowercased()
 
         components.scheme = scheme
         components.host = host
@@ -40,6 +50,30 @@ public enum WebDraftKey {
             throw invalidURL()
         }
         return normalized
+    }
+
+    private static func isValidHostname(_ host: String) -> Bool {
+        guard !host.isEmpty,
+              host.utf8.count <= 253,
+              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            return false
+        }
+        return host.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+            guard !label.isEmpty,
+                  label.utf8.count <= 63,
+                  label.first != "-",
+                  label.last != "-" else {
+                return false
+            }
+            return label.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 45, 48...57, 65...90, 97...122:
+                    true
+                default:
+                    false
+                }
+            }
+        }
     }
 
     private static func invalidURL() -> NSError {

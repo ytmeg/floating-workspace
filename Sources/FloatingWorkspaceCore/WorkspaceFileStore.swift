@@ -31,8 +31,7 @@ public struct WorkspaceFileStore: WorkspacePersisting {
         case 1:
             var migrated = content
             migrated.schemaVersion = 2
-            let backup = unusedBackupURL(prefix: "workspace-v1.backup-")
-            try FileManager.default.copyItem(at: fileURL, to: backup)
+            let backup = try writeMigrationBackup(data)
             return WorkspaceLoadResult(
                 content: migrated,
                 recoveryURL: nil,
@@ -42,6 +41,49 @@ public struct WorkspaceFileStore: WorkspacePersisting {
             return WorkspaceLoadResult(content: content, recoveryURL: nil)
         default:
             return try recoverOriginal()
+        }
+    }
+
+    private func existingMigrationBackup(matching data: Data) throws -> URL? {
+        let directory = fileURL.deletingLastPathComponent()
+        let candidates = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.hasPrefix("workspace-v1.backup-") && $0.hasSuffix(".json") }
+            .sorted()
+            .map { directory.appendingPathComponent($0) }
+        for candidate in candidates where try Data(contentsOf: candidate) == data {
+            return candidate
+        }
+        return nil
+    }
+
+    private func writeMigrationBackup(_ data: Data) throws -> URL {
+        if let existing = try existingMigrationBackup(matching: data) {
+            return existing
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: now()).replacingOccurrences(of: ":", with: "-")
+        let directory = fileURL.deletingLastPathComponent()
+        var counter = 1
+        while true {
+            let suffix = counter == 1 ? "" : "-\(counter)"
+            let backup = directory.appendingPathComponent("workspace-v1.backup-\(stamp)\(suffix).json")
+            let staged = directory.appendingPathComponent(".\(UUID().uuidString)-workspace-v1.backup.tmp")
+            defer { try? FileManager.default.removeItem(at: staged) }
+            do {
+                // This SDK traps on [.atomic, .withoutOverwriting]; staging plus a hard link preserves both guarantees.
+                try data.write(to: staged, options: .atomic)
+                try FileManager.default.linkItem(at: staged, to: backup)
+                return backup
+            } catch let error as NSError {
+                guard error.domain == NSCocoaErrorDomain, error.code == NSFileWriteFileExistsError else {
+                    throw error
+                }
+                if try Data(contentsOf: backup) == data {
+                    return backup
+                }
+                counter += 1
+            }
         }
     }
 
@@ -72,6 +114,21 @@ public struct WorkspaceFileStore: WorkspacePersisting {
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Unsupported workspace schema version: \(content.schemaVersion)"]
             )
+        }
+
+        for (name, value) in [
+            ("red", content.blankBackground.red),
+            ("green", content.blankBackground.green),
+            ("blue", content.blankBackground.blue),
+            ("alpha", content.blankBackground.alpha)
+        ] {
+            guard value.isFinite else {
+                throw NSError(
+                    domain: "WorkspaceFileStore",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Blank background \(name) channel must be finite"]
+                )
+            }
         }
 
         var normalized = content

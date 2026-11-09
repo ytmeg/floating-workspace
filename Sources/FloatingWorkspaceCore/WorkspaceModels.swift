@@ -71,7 +71,20 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
         blankTitle = try container.decode(String.self, forKey: .blankTitle)
         blankBackground = try container.decode(RGBAColor.self, forKey: .blankBackground)
         isPinned = try container.decode(Bool.self, forKey: .isPinned)
-        webDrafts = try container.decodeIfPresent([String: WebDraft].self, forKey: .webDrafts) ?? [:]
+        if container.contains(.webDrafts) {
+            guard let drafts = try container.decodeIfPresent([String: WebDraft].self, forKey: .webDrafts) else {
+                throw DecodingError.valueNotFound(
+                    [String: WebDraft].self,
+                    DecodingError.Context(
+                        codingPath: [CodingKeys.webDrafts],
+                        debugDescription: "webDrafts must not be null"
+                    )
+                )
+            }
+            webDrafts = drafts
+        } else {
+            webDrafts = [:]
+        }
     }
 }
 
