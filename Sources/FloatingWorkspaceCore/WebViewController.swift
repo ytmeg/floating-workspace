@@ -4,6 +4,7 @@ import WebKit
 
 @MainActor
 public final class WebViewController: NSViewController {
+    private static let draftContentWorld = WKContentWorld.world(name: "FloatingWorkspace.WebDraft")
     public let store: WebDraftStore
     public let webView: WKWebView
     public let urlField = NSTextField()
@@ -33,6 +34,7 @@ public final class WebViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         configuration.userContentController.add(
             WeakWebDraftMessageHandler(delegate: self),
+            contentWorld: Self.draftContentWorld,
             name: WebDraftSanitizer.messageHandlerName
         )
         webView.navigationDelegate = self
@@ -82,7 +84,7 @@ public final class WebViewController: NSViewController {
         updateEditButton()
         errorLabel.stringValue = ""
 
-        webView.evaluateJavaScript(WebDraftSanitizer.setEditing(enabled: requestedState)) { [weak self] result, error in
+        evaluateDraftJavaScript(WebDraftSanitizer.setEditing(enabled: requestedState)) { [weak self] result, error in
             guard let self else { return }
             if let error {
                 self.isEditing = !requestedState
@@ -104,8 +106,7 @@ public final class WebViewController: NSViewController {
                 return
             }
             self.errorLabel.stringValue = ""
-            self.hasPendingDraftChanges = true
-            if !requestedState {
+            if !requestedState && self.hasPendingDraftChanges {
                 self.flushDraft { (_: Result<Void, Error>) in }
             }
         }
@@ -135,7 +136,7 @@ public final class WebViewController: NSViewController {
         }
 
         isFlushingDraft = true
-        webView.evaluateJavaScript(WebDraftSanitizer.sanitizeBody()) { [weak self] result, error in
+        evaluateDraftJavaScript(WebDraftSanitizer.sanitizeBody()) { [weak self] result, error in
             guard let self else { return }
             if let error {
                 self.completeDraftFlush(with: .failure(error))
@@ -173,6 +174,20 @@ public final class WebViewController: NSViewController {
         let completions = draftFlushCompletions
         draftFlushCompletions.removeAll()
         completions.forEach { $0(result) }
+    }
+
+    private func evaluateDraftJavaScript(
+        _ script: String,
+        completion: @escaping (Any?, Error?) -> Void
+    ) {
+        webView.evaluateJavaScript(script, in: nil, in: Self.draftContentWorld) { result in
+            switch result {
+            case .success(let value):
+                completion(value, nil)
+            case .failure(let error):
+                completion(nil, error)
+            }
+        }
     }
 
     private static func draftError(_ message: String) -> NSError {
@@ -369,7 +384,7 @@ extension WebViewController: WKNavigationDelegate {
             return
         }
         let generation = navigationGeneration
-        webView.evaluateJavaScript(WebDraftSanitizer.applySanitizedBody(draft.sanitizedBodyHTML)) { [weak self] result, error in
+        evaluateDraftJavaScript(WebDraftSanitizer.applySanitizedBody(draft.sanitizedBodyHTML)) { [weak self] result, error in
             guard let self, generation == self.navigationGeneration else { return }
             if error != nil {
                 self.showError("无法应用上次修改")
@@ -464,9 +479,19 @@ extension WebViewController: WKScriptMessageHandler {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        guard message.name == WebDraftSanitizer.messageHandlerName, isEditing else { return }
-        hasPendingDraftChanges = true
-        flushDraft { (_: Result<Void, Error>) in }
+        guard message.name == WebDraftSanitizer.messageHandlerName,
+              isEditing,
+              let body = message.body as? [String: Any],
+              let kind = body["kind"] as? String else { return }
+        switch kind {
+        case "dirty":
+            hasPendingDraftChanges = true
+        case "idle":
+            guard hasPendingDraftChanges else { return }
+            flushDraft { (_: Result<Void, Error>) in }
+        default:
+            break
+        }
     }
 }
 

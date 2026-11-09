@@ -246,6 +246,102 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertFalse(fixture.store.isDirty)
     }
 
+    func testTerminationFlushesNewMutationMadeWithinEightHundredMillisecondsAfterIdleSave() throws {
+        let fixture = try makeFixture()
+        let delegate = AppDelegate()
+        delegate.store = fixture.store
+        let drafts = WebDraftStore(store: fixture.store)
+        let controller = WebViewController(store: drafts)
+        _ = controller.view
+        let url = try XCTUnwrap(URL(string: "https://example.com/latest-termination-edit"))
+        controller.webView.loadHTMLString(
+            "<html><body><p id='text'>original</p></body></html>",
+            baseURL: url
+        )
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "加载完成"),
+            object: controller.statusLabel
+        )
+        wait(for: [loaded], timeout: 5)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'first autosave'", in: controller)
+        _ = try waitForDraft(containing: "first autosave", for: url, in: drafts)
+        _ = try evaluate("document.getElementById('text').textContent = 'latest termination edit'", in: controller)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        delegate.webViewController = controller
+        var replies: [Bool] = []
+        delegate.terminationReplyHandler = { replies.append($0) }
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateLater)
+        let saveDeadline = Date().addingTimeInterval(2)
+        while fixture.saver.snapshots.isEmpty && Date() < saveDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        guard fixture.saver.snapshots.count == 1 else {
+            return XCTFail("Expected exactly one ContentStore save after the latest draft flush")
+        }
+        let snapshot = fixture.saver.snapshots[0]
+        let html = try XCTUnwrap(snapshot.webDrafts["https://example.com/latest-termination-edit"]?.sanitizedBodyHTML)
+        XCTAssertTrue(html.contains("latest termination edit"))
+        XCTAssertFalse(html.contains("first autosave"))
+        fixture.saver.completeSuccess(at: 0)
+        drainTerminationQueue()
+        XCTAssertEqual(replies, [true])
+    }
+
+    func testTerminationDraftJavaScriptThrowRetainsDirtyAndAllowsRetryThenDiscard() throws {
+        let fixture = try makeFixture()
+        let delegate = AppDelegate()
+        delegate.store = fixture.store
+        let drafts = WebDraftStore(store: fixture.store)
+        let controller = WebViewController(store: drafts)
+        _ = controller.view
+        let url = try XCTUnwrap(URL(string: "https://example.com/termination-save-throws"))
+        controller.webView.loadHTMLString(
+            "<html><body><p id='text'>original</p></body></html>",
+            baseURL: url
+        )
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "加载完成"),
+            object: controller.statusLabel
+        )
+        wait(for: [loaded], timeout: 5)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'must stay dirty on quit'", in: controller)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        _ = try evaluateInDraftWorld(
+            "Element.prototype.cloneNode = function() { throw new Error('injected termination save failure'); }; true;",
+            in: controller
+        )
+        delegate.webViewController = controller
+        var replies: [Bool] = []
+        var alertCount = 0
+        delegate.terminationReplyHandler = { replies.append($0) }
+        delegate.alertPresenter = { alert in
+            alertCount += 1
+            XCTAssertEqual(alert.buttons.map(\.title), ["重试", "放弃未保存内容并退出"])
+            XCTAssertTrue(controller.needsDraftFlush)
+            return alertCount == 1 ? .alertFirstButtonReturn : .alertSecondButtonReturn
+        }
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateLater)
+        let outcomeDeadline = Date().addingTimeInterval(2)
+        while replies.isEmpty,
+              fixture.saver.snapshots.isEmpty,
+              Date() < outcomeDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        XCTAssertEqual(alertCount, 2)
+        XCTAssertEqual(replies, [true])
+        XCTAssertTrue(fixture.saver.snapshots.isEmpty)
+        XCTAssertTrue(controller.needsDraftFlush)
+        XCTAssertNil(try drafts.draft(for: url))
+    }
+
     func testApplicationWillTerminateStopsHotkey() throws {
         let delegate = AppDelegate()
         let first = HotkeyController {}
@@ -279,6 +375,48 @@ final class AppDelegateTests: XCTestCase {
             ).path,
             "/dev/null/workspace-v1.json"
         )
+    }
+
+    private func waitForDraft(
+        containing text: String,
+        for url: URL,
+        in drafts: WebDraftStore,
+        timeout: TimeInterval = 2
+    ) throws -> WebDraft {
+        let deadline = Date().addingTimeInterval(timeout)
+        var matched: WebDraft?
+        while matched == nil && Date() < deadline {
+            if let draft = try drafts.draft(for: url), draft.sanitizedBodyHTML.contains(text) {
+                matched = draft
+            } else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+        }
+        return try XCTUnwrap(matched)
+    }
+
+    private func evaluateInDraftWorld(_ script: String, in controller: WebViewController) throws -> Any? {
+        let completed = expectation(description: "isolated JavaScript evaluation completed")
+        var result: Any?
+        var evaluationError: Error?
+        controller.webView.evaluateJavaScript(
+            script,
+            in: nil,
+            in: .world(name: "FloatingWorkspace.WebDraft")
+        ) { completion in
+            switch completion {
+            case .success(let value):
+                result = value
+            case .failure(let error):
+                evaluationError = error
+            }
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 5)
+        if let evaluationError {
+            throw evaluationError
+        }
+        return result
     }
 
     private func evaluate(_ script: String, in controller: WebViewController) throws -> Any? {

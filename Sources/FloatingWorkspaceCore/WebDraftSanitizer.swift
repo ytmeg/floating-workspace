@@ -50,6 +50,7 @@ enum WebDraftSanitizer {
                 return;
             }
             state.observer = new MutationObserver(() => {
+                window.webkit.messageHandlers.floatingWorkspaceDraftIdle.postMessage({ kind: 'dirty' });
                 if (state.timer !== null) {
                     clearTimeout(state.timer);
                 }
@@ -65,18 +66,33 @@ enum WebDraftSanitizer {
                 attributes: true
             });
         };
-        const sanitizeElement = root => {
-            const clone = root.cloneNode(true);
-            clone.querySelectorAll('script, iframe, object, embed').forEach(element => element.remove());
-            clone.querySelectorAll('meta[http-equiv]').forEach(element => {
-                const value = (element.getAttribute('http-equiv') || '').trim().toLowerCase();
-                if (value === 'refresh') {
-                    element.remove();
+        const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'data']);
+        const activeElementNames = new Set([
+            'script', 'iframe', 'object', 'embed', 'frame', 'frameset',
+            'portal', 'applet', 'base', 'set', 'animate'
+        ]);
+        const sanitizeTree = root => {
+            const elements = root.nodeType === 1 ? [root, ...root.querySelectorAll('*')] : [...root.querySelectorAll('*')];
+            elements.forEach(element => {
+                const localName = element.localName.toLowerCase();
+                if (localName === 'set' || localName === 'animate') {
+                    const target = (element.getAttribute('attributeName') || '').toLowerCase();
+                    if (urlAttributes.has(target)) {
+                        ['to', 'values', 'from', 'by'].forEach(name => element.removeAttribute(name));
+                    }
                 }
-            });
+                if (activeElementNames.has(localName)) {
+                    element.remove();
+                    return;
+                }
+                if (localName === 'meta') {
+                    const refresh = (element.getAttribute('http-equiv') || '').trim().toLowerCase();
+                    if (refresh === 'refresh') {
+                        element.remove();
+                        return;
+                    }
+                }
 
-            const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'data']);
-            [clone, ...clone.querySelectorAll('*')].forEach(element => {
                 Array.from(element.attributes).forEach(attribute => {
                     const name = attribute.name.toLowerCase();
                     const compactValue = Array.from(attribute.value).filter(character => {
@@ -87,20 +103,33 @@ enum WebDraftSanitizer {
                     }
                 });
                 element.removeAttribute('formaction');
+                element.removeAttribute('formmethod');
+                element.removeAttribute('formtarget');
+                if (localName === 'form') {
+                    element.removeAttribute('action');
+                    element.removeAttribute('method');
+                }
+                if (localName === 'input' || localName === 'button' || localName === 'select') {
+                    element.removeAttribute('value');
+                    element.removeAttribute('checked');
+                }
+                if (localName === 'textarea') {
+                    element.textContent = '';
+                    element.removeAttribute('value');
+                }
+                if (localName === 'option') {
+                    element.removeAttribute('selected');
+                }
             });
-            clone.querySelectorAll('form').forEach(form => {
-                form.removeAttribute('action');
-                form.removeAttribute('method');
+            elements.forEach(element => {
+                if (element.localName.toLowerCase() === 'template') {
+                    sanitizeTree(element.content);
+                }
             });
-            clone.querySelectorAll('input, button, select').forEach(input => {
-                input.removeAttribute('value');
-                input.removeAttribute('checked');
-            });
-            clone.querySelectorAll('textarea').forEach(textarea => {
-                textarea.textContent = '';
-                textarea.removeAttribute('value');
-            });
-            clone.querySelectorAll('option').forEach(option => option.removeAttribute('selected'));
+        };
+        const sanitizeElement = root => {
+            const clone = root.cloneNode(true);
+            sanitizeTree(clone);
             return clone;
         };
         """
@@ -114,13 +143,15 @@ enum WebDraftSanitizer {
                 return { ok: false, reason: 'no-body' };
             }
             const state = stateFor();
-            state.editing = \(enabled);
-            body.contentEditable = \(enabled) ? 'true' : 'false';
             if (\(enabled)) {
+                state.editing = true;
+                body.contentEditable = 'true';
                 installSubmitInterceptor(state);
                 startObserving(state);
             } else {
                 stopObserving(state);
+                state.editing = false;
+                body.contentEditable = 'false';
                 if (!state.replayApplied) {
                     removeSubmitInterceptor(state);
                 }
