@@ -69,7 +69,8 @@ enum WebDraftSanitizer {
         const urlAttributes = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'data']);
         const activeElementNames = new Set([
             'script', 'iframe', 'object', 'embed', 'frame', 'frameset',
-            'portal', 'applet', 'base', 'set', 'animate'
+            'portal', 'applet', 'base', 'set', 'animate',
+            'noscript', 'noembed', 'noframes'
         ]);
         const sanitizeTree = root => {
             const elements = root.nodeType === 1 ? [root, ...root.querySelectorAll('*')] : [...root.querySelectorAll('*')];
@@ -105,6 +106,7 @@ enum WebDraftSanitizer {
                 element.removeAttribute('formaction');
                 element.removeAttribute('formmethod');
                 element.removeAttribute('formtarget');
+                element.removeAttribute('ping');
                 if (localName === 'form') {
                     element.removeAttribute('action');
                     element.removeAttribute('method');
@@ -185,7 +187,14 @@ enum WebDraftSanitizer {
             stopObserving(state);
             const parsed = document.implementation.createHTMLDocument('');
             parsed.body.innerHTML = \(javaScriptStringLiteral(for: html));
-            body.innerHTML = sanitizeElement(parsed.body).innerHTML;
+            const sanitized = sanitizeElement(parsed.body);
+            // Move nodes with importNode instead of re-serializing: serializing the inert
+            // document would turn noscript children into markup that the live document
+            // parses as raw text, which can break out into active elements.
+            body.replaceChildren(...Array.from(
+                sanitized.childNodes,
+                node => document.importNode(node, true)
+            ));
             state.replayApplied = true;
             installSubmitInterceptor(state);
             if (state.editing) {

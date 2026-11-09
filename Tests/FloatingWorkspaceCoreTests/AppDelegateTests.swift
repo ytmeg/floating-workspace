@@ -353,6 +353,66 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertNil(try drafts.draft(for: url))
     }
 
+    func testDraftSaveFailureAtQuitStillSavesNoteThenAlertsOnceDraftIsDiscarded() throws {
+        let fixture = try makeFixture()
+        let delegate = AppDelegate()
+        delegate.store = fixture.store
+        let drafts = WebDraftStore(store: fixture.store)
+        let controller = WebViewController(store: drafts)
+        _ = controller.view
+        let url = try XCTUnwrap(URL(string: "https://example.com/termination-draft-fails"))
+        controller.webView.loadHTMLString(
+            "<html><body><p id='text'>original</p></body></html>",
+            baseURL: url
+        )
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "stringValue == %@", "加载完成"),
+            object: controller.statusLabel
+        )
+        wait(for: [loaded], timeout: 5)
+        controller.toggleEditing()
+        XCTAssertEqual(try evaluate("document.body.contentEditable", in: controller) as? String, "true")
+        _ = try evaluate("document.getElementById('text').textContent = 'draft that cannot save'", in: controller)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        _ = try evaluateInDraftWorld(
+            "Element.prototype.cloneNode = function() { throw new Error('injected quit draft failure'); }; true;",
+            in: controller
+        )
+        delegate.webViewController = controller
+        fixture.store.update { $0.noteText = "note that must still save" }
+        var replies: [Bool] = []
+        var alertCount = 0
+        var alertTexts: [String] = []
+        delegate.terminationReplyHandler = { replies.append($0) }
+        delegate.alertPresenter = { alert in
+            alertCount += 1
+            alertTexts.append("\(alert.messageText)\n\(alert.informativeText)")
+            XCTAssertEqual(alert.buttons.map(\.title), ["重试", "放弃未保存内容并退出"])
+            return .alertSecondButtonReturn
+        }
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateLater)
+        let saveDeadline = Date().addingTimeInterval(2)
+        while fixture.saver.snapshots.isEmpty && Date() < saveDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        guard fixture.saver.snapshots.count == 1 else {
+            return XCTFail("Expected the ContentStore save to still run after a failed web draft flush")
+        }
+        XCTAssertEqual(fixture.saver.snapshots[0].noteText, "note that must still save")
+        XCTAssertTrue(fixture.saver.snapshots[0].webDrafts.isEmpty)
+        XCTAssertEqual(alertCount, 0)
+
+        fixture.saver.completeSuccess(at: 0)
+        drainTerminationQueue()
+
+        XCTAssertEqual(alertCount, 1)
+        XCTAssertTrue(alertTexts.first?.contains("网页草稿未能保存") == true)
+        XCTAssertEqual(replies, [true])
+        XCTAssertFalse(fixture.store.isDirty)
+    }
+
     func testApplicationWillTerminateStopsHotkey() throws {
         let delegate = AppDelegate()
         let first = HotkeyController {}

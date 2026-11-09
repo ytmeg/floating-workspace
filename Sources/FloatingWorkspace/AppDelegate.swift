@@ -113,37 +113,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func flushForTermination(using store: ContentStore) {
         guard let webViewController else {
-            flushContentStoreForTermination(using: store)
+            flushContentStoreForTermination(using: store, draftFailure: nil)
             return
         }
         webViewController.flushDraft { result in
-            switch result {
-            case .success:
-                self.flushContentStoreForTermination(using: store)
-            case .failure:
-                self.presentTerminationSaveFailure()
+            var draftFailure: Error?
+            if case .failure(let error) = result {
+                draftFailure = error
             }
+            // A web draft failure must not discard note or blank edits that would save
+            // fine, so the workspace flush runs either way and only then is it reported.
+            self.flushContentStoreForTermination(using: store, draftFailure: draftFailure)
         }
     }
 
     @MainActor
-    private func flushContentStoreForTermination(using store: ContentStore) {
+    private func flushContentStoreForTermination(using store: ContentStore, draftFailure: Error?) {
         store.flush { result in
             switch result {
             case .success:
-                self.terminationReplyHandler(true)
+                if let draftFailure {
+                    self.presentTerminationSaveFailure(draftFailure: draftFailure)
+                } else {
+                    self.terminationReplyHandler(true)
+                }
             case .failure:
-                self.presentTerminationSaveFailure()
+                self.presentTerminationSaveFailure(draftFailure: draftFailure)
             }
         }
     }
 
     @MainActor
-    private func presentTerminationSaveFailure() {
+    private func presentTerminationSaveFailure(draftFailure: Error? = nil) {
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = "退出前保存失败"
-        alert.informativeText = "未保存的内容仍保留。你可以重试，或明确放弃未保存内容并退出。"
+        if let draftFailure {
+            alert.messageText = "网页草稿未能保存"
+            alert.informativeText = """
+                网页修改无法保存（\(draftFailure.localizedDescription)）。其他内容已保存。
+                你可以重试保存网页草稿，或放弃网页修改并退出。
+                """
+        } else {
+            alert.messageText = "退出前保存失败"
+            alert.informativeText = "未保存的内容仍保留。你可以重试，或明确放弃未保存内容并退出。"
+        }
         alert.addButton(withTitle: "重试")
         alert.addButton(withTitle: "放弃未保存内容并退出")
 

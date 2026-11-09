@@ -25,6 +25,11 @@ public final class WebViewController: NSViewController {
     private var replayAttempted = false
     private var navigationGeneration = 0
     private var currentDocumentURL: URL?
+    private var allowMainFrameNavigationAfterFlushFailure = false
+    private var pendingDraftLossWarning: String?
+
+    static let processTerminationMessage = "网页进程已终止，未保存的网页修改已丢失"
+    static let navigationDraftLossWarning = "无法保存网页草稿，继续导航会丢失未保存的网页修改"
 
     public init(store: WebDraftStore) {
         self.store = store
@@ -168,12 +173,22 @@ public final class WebViewController: NSViewController {
         switch result {
         case .success:
             hasPendingDraftChanges = false
+            pendingDraftLossWarning = nil
         case .failure(let error):
+            allowMainFrameNavigationAfterFlushFailure = true
             showError("无法保存网页草稿：\(error.localizedDescription)")
         }
         let completions = draftFlushCompletions
         draftFlushCompletions.removeAll()
         completions.forEach { $0(result) }
+    }
+
+    private func discardPendingDraftChangesShowingLossWarning() {
+        hasPendingDraftChanges = false
+        isEditing = false
+        updateEditButton()
+        pendingDraftLossWarning = Self.navigationDraftLossWarning
+        showError(Self.navigationDraftLossWarning)
     }
 
     private func evaluateDraftJavaScript(
@@ -363,7 +378,7 @@ extension WebViewController: WKNavigationDelegate {
         hasPendingDraftChanges = false
         updateEditButton()
         statusLabel.stringValue = "正在加载"
-        errorLabel.stringValue = ""
+        errorLabel.stringValue = pendingDraftLossWarning ?? ""
         updateNavigationButtons()
     }
 
@@ -378,7 +393,7 @@ extension WebViewController: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         currentDocumentURL = webView.url
         statusLabel.stringValue = "加载完成"
-        errorLabel.stringValue = ""
+        errorLabel.stringValue = pendingDraftLossWarning ?? ""
         if let url = webView.url {
             urlField.stringValue = url.absoluteString
         }
@@ -423,19 +438,51 @@ extension WebViewController: WKNavigationDelegate {
         handleNavigationFailure(error)
     }
 
+    public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        // The web content process is gone: pending edits cannot be saved and any in-flight
+        // JavaScript will never call back, so drop the state and say so plainly.
+        hasPendingDraftChanges = false
+        isEditing = false
+        isFlushingDraft = false
+        allowMainFrameNavigationAfterFlushFailure = false
+        pendingDraftLossWarning = nil
+        let completions = draftFlushCompletions
+        draftFlushCompletions.removeAll()
+        let error = Self.draftError(Self.processTerminationMessage)
+        completions.forEach { $0(.failure(error)) }
+        updateEditButton()
+        statusLabel.stringValue = "加载失败"
+        showError(Self.processTerminationMessage)
+    }
+
     public func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         guard let url = navigationAction.request.url else {
-            showError("请输入有效的 http 或 https 链接")
+            if isMainFrame {
+                showError("请输入有效的 http 或 https 链接")
+            }
             decisionHandler(.cancel)
+            return
+        }
+        guard isMainFrame else {
+            // Subframe loads (including about:srcdoc) never carry the main document draft,
+            // so they are validated on their own and never touch the main-frame error label.
+            decisionHandler(subframePolicy(for: url))
             return
         }
         if let message = navigationValidationError(for: url) {
             showError(message)
             decisionHandler(.cancel)
+            return
+        }
+        if allowMainFrameNavigationAfterFlushFailure {
+            allowMainFrameNavigationAfterFlushFailure = false
+            discardPendingDraftChangesShowingLossWarning()
+            decisionHandler(.allow)
             return
         }
         flushDraft(sourceURL: currentDocumentURL ?? webView.url) { result in
@@ -462,6 +509,17 @@ extension WebViewController: WKNavigationDelegate {
             return nil
         }
         return validationError(for: url)
+    }
+
+    /// Subframes are allowed when they are inert local documents or ordinary web schemes.
+    /// They are never allowed to inherit the main-frame URL contract (no http/https scheme
+    /// requirement for `about:` documents) and never written into the main-frame error label.
+    private func subframePolicy(for url: URL) -> WKNavigationActionPolicy {
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme.isEmpty || scheme == "about" {
+            return .allow
+        }
+        return validationError(for: url) == nil ? .allow : .cancel
     }
 
     private func handleNavigationFailure(_ error: Error) {
