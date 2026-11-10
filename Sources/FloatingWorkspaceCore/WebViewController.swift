@@ -560,12 +560,19 @@ extension WebViewController: WKNavigationDelegate {
 
     private func handleNavigationFailure(_ error: Error, navigation: WKNavigation?) {
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled,
-           navigation !== latestRequestedNavigation {
-            return
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+            // A cancellation is only a failure for the URL the user explicitly asked for.
+            // Superseded page-initiated loads (such as about:blank) cancel silently.
+            guard navigation === latestRequestedNavigation, latestRequestedURL != nil else {
+                if navigation === latestRequestedNavigation {
+                    latestRequestedNavigation = nil
+                }
+                return
+            }
         }
 
         navigationFailureGeneration = navigationGeneration
+        latestRequestedNavigation = nil
         latestRequestedURL = nil
         statusLabel.stringValue = "加载失败"
         switch nsError.code {

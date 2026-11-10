@@ -234,6 +234,53 @@ final class WebViewControllerTests: XCTestCase {
         XCTAssertTrue(controller.errorLabel.stringValue.hasPrefix("网络加载失败："))
     }
 
+    func testSupersededPageInitiatedNavigationCancellationShowsNoNetworkError() throws {
+        let controller = try makeController()
+        let blank = try loadHTML("", in: controller)
+        let replacement = try loadHTML("<html><body><p>replacement</p></body></html>", in: controller)
+        let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+
+        // Neither navigation came from load(url:), so the first one is adopted as latest without a URL.
+        controller.webView(controller.webView, didStartProvisionalNavigation: blank)
+        controller.webView(controller.webView, didStartProvisionalNavigation: replacement)
+        controller.webView(controller.webView, didFailProvisionalNavigation: blank, withError: cancelled)
+
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+        XCTAssertEqual(controller.statusLabel.stringValue, "正在加载")
+
+        controller.webView(controller.webView, didFinish: replacement)
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载完成")
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+    }
+
+    func testFailureClearsLatestRequestSoLaterPageNavigationIsTrackedAfresh() throws {
+        let controller = try makeController()
+        let requested = try XCTUnwrap(controller.load(url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/requested"))))
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSLocalizedDescriptionKey: "Could not connect to the server."]
+        )
+        controller.webView(controller.webView, didStartProvisionalNavigation: requested)
+        controller.webView(controller.webView, didFailProvisionalNavigation: requested, withError: error)
+        XCTAssertEqual(controller.errorLabel.stringValue, "网络加载失败：Could not connect to the server.")
+
+        let base = try XCTUnwrap(URL(string: "https://example.test/"))
+        let page = try loadHTML("<html><body><p>page</p></body></html>", baseURL: base, in: controller)
+        let superseding = try loadHTML("<html><body><p>superseding</p></body></html>", baseURL: base, in: controller)
+        controller.webView(controller.webView, didStartProvisionalNavigation: page)
+        controller.webView(controller.webView, didStartProvisionalNavigation: superseding)
+        let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        controller.webView(controller.webView, didFailProvisionalNavigation: requested, withError: cancelled)
+        controller.webView(controller.webView, didFailProvisionalNavigation: page, withError: cancelled)
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+        XCTAssertEqual(controller.statusLabel.stringValue, "正在加载")
+        controller.webView(controller.webView, didFinish: superseding)
+
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载完成")
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+    }
+
     func testBlankCompletionAfterFailureKeepsErrorUntilNextSuccessfulNavigation() throws {
         let controller = try makeController()
         let navigation = try loadHTML("<html><body><p>keep me</p></body></html>", in: controller)
