@@ -19,6 +19,7 @@ public final class ImageCanvasView: NSView {
     public var tool: ImageEditTool = .pencil
     public var isCropEditingEnabled = false
     public var textContent = ""
+    public var textContentProvider: (() -> String)?
     public var annotationColor = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
 
     public var onCrop: ((ImageRect) -> Void)?
@@ -71,16 +72,18 @@ public final class ImageCanvasView: NSView {
         editingCrop = nil
 
         if isCropEditingEnabled {
-            guard layout.normalizedPoint(forDisplay: point) != nil else { return }
             let initial = layout.normalizedCrop
             let handle = resizeHandle(for: layout.cropRect)
             let kind: CropInteraction
             if handle.contains(point) {
                 kind = .resize(initial)
-            } else if initial != .full, layout.cropRect.contains(point) {
-                kind = .move(initial)
             } else {
-                kind = .new
+                guard layout.normalizedPoint(forDisplay: point) != nil else { return }
+                if initial != .full, layout.cropRect.contains(point) {
+                    kind = .move(initial)
+                } else {
+                    kind = .new
+                }
             }
             interaction = .crop(kind: kind, start: point)
             editingCrop = initial
@@ -93,7 +96,7 @@ public final class ImageCanvasView: NSView {
             interaction = .pencil([normalized])
         case .text:
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
-            onText?(textContent, normalized)
+            onText?(textContentProvider?() ?? textContent, normalized)
         case .arrow:
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
             interaction = .arrow(start: normalized, current: point)
@@ -131,7 +134,12 @@ public final class ImageCanvasView: NSView {
         case let .arrow(start, _):
             self.interaction = nil
             if let end = layout.normalizedPoint(forDisplay: point) {
-                onArrow?(start, end)
+                let displayStart = layout.displayPoint(forNormalized: start)
+                let displayEnd = layout.displayPoint(forNormalized: end)
+                let displayLength = hypot(displayEnd.x - displayStart.x, displayEnd.y - displayStart.y)
+                if displayLength >= 1 {
+                    onArrow?(start, end)
+                }
             }
         case let .crop(kind, start):
             let crop = crop(for: kind, start: start, current: point, layout: layout)
@@ -252,7 +260,7 @@ public final class ImageCanvasView: NSView {
                 .foregroundColor: Self.nsColor(color)
             ]
             NSAttributedString(string: content, attributes: attributes)
-                .draw(at: layout.displayPoint(forNormalized: position))
+                .draw(at: layout.textOrigin(forNormalized: position))
         case let .arrow(start, end, color, width):
             let displayStart = layout.displayPoint(forNormalized: start)
             let displayEnd = layout.displayPoint(forNormalized: end)

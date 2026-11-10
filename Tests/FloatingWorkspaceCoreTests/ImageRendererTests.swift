@@ -164,6 +164,30 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertEqual(nearEdge.height, 0.125, accuracy: 0.000_000_001)
     }
 
+    func testLayoutNormalizesTinyCropEdgeOvershootByAdjustingOrigin() throws {
+        let overshoot = 0.600_000_000_000_000_1
+        let layout = try XCTUnwrap(ImageRenderer.Layout(
+            originalSize: CGSize(width: 200, height: 100),
+            displayScale: 2,
+            crop: ImageRect(
+                x: overshoot,
+                y: overshoot,
+                width: (0.4 as Double).nextUp,
+                height: (0.4 as Double).nextUp
+            ),
+            viewSize: CGSize(width: 333, height: 217)
+        ))
+
+        let crop = layout.normalizedCrop
+        XCTAssertEqual(crop.x, 0.6, accuracy: 0.000_000_001)
+        XCTAssertEqual(crop.y, 0.6, accuracy: 0.000_000_001)
+        XCTAssertEqual(crop.width, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual(crop.height, 0.4, accuracy: 0.000_000_001)
+        XCTAssertLessThanOrEqual(crop.x + crop.width, 1)
+        XCTAssertLessThanOrEqual(crop.y + crop.height, 1)
+        XCTAssertEqual((crop.width * 200) / (crop.height * 100), 2, accuracy: 0.000_000_001)
+    }
+
     func testInvalidLayoutInputsProduceNoLayout() {
         XCTAssertNil(ImageRenderer.Layout(
             originalSize: CGSize(width: 0, height: 100),
@@ -281,9 +305,144 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertEqual(pixelAspect, 2, accuracy: 0.000_000_001)
     }
 
+    func testTextOriginUsesBaselineLeftDisplayAnchor() throws {
+        let layout = try makeLayout(
+            scale: 2,
+            crop: ImageRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4),
+            viewSize: CGSize(width: 333, height: 217)
+        )
+        let origin = layout.textOrigin(forNormalized: ImagePoint(x: 0.2, y: 0.7))
+
+        assertPoint(
+            origin,
+            x: layout.imageRect.minX + layout.imageRect.width * 0.2,
+            y: layout.imageRect.minY + layout.imageRect.height * 0.7
+        )
+    }
+
+    func testCanvasMoveCropToOddScaleMaxAndMinEdges() throws {
+        let initial = ImageRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4)
+        let viewSize = CGSize(width: 333, height: 217)
+        let canvas = try makeCanvas(scale: 2, crop: initial, viewSize: viewSize)
+        let layout = try makeLayout(scale: 2, crop: initial, viewSize: viewSize)
+        canvas.isCropEditingEnabled = true
+        var crops: [ImageRect] = []
+        canvas.onCrop = { crops.append($0) }
+
+        let maxStart = CGPoint(x: layout.cropRect.midX, y: layout.cropRect.midY)
+        let maxDelta = CGPoint(
+            x: layout.imageRect.maxX - layout.cropRect.maxX,
+            y: layout.imageRect.maxY - layout.cropRect.maxY
+        )
+        canvas.beginInteraction(at: maxStart)
+        canvas.endInteraction(at: CGPoint(x: maxStart.x + maxDelta.x, y: maxStart.y + maxDelta.y))
+        let maximum = try XCTUnwrap(crops.last)
+        XCTAssertEqual(maximum.x, 0.6, accuracy: 0.000_000_001)
+        XCTAssertEqual(maximum.y, 0.6, accuracy: 0.000_000_001)
+        XCTAssertEqual(maximum.width, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual(maximum.height, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual((maximum.width * 200) / (maximum.height * 100), 2, accuracy: 0.000_000_001)
+
+        canvas.document?.cropRect = initial
+        let minStart = CGPoint(x: layout.cropRect.midX, y: layout.cropRect.midY)
+        let minDelta = CGPoint(
+            x: layout.imageRect.minX - layout.cropRect.minX,
+            y: layout.imageRect.minY - layout.cropRect.minY
+        )
+        canvas.beginInteraction(at: minStart)
+        canvas.endInteraction(at: CGPoint(x: minStart.x + minDelta.x, y: minStart.y + minDelta.y))
+        let minimum = try XCTUnwrap(crops.last)
+        XCTAssertEqual(minimum.x, 0, accuracy: 0.000_000_001)
+        XCTAssertEqual(minimum.y, 0, accuracy: 0.000_000_001)
+        XCTAssertEqual(minimum.width, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual(minimum.height, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual((minimum.width * 200) / (minimum.height * 100), 2, accuracy: 0.000_000_001)
+    }
+
+    func testCanvasMoveCropToMaxEdgeAcrossOddScales() throws {
+        let initial = ImageRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4)
+        let viewSizes = [
+            CGSize(width: 333, height: 217),
+            CGSize(width: 337, height: 219),
+            CGSize(width: 333, height: 219)
+        ]
+        for viewSize in viewSizes {
+            for scale in [1.1, 1.3, 1.7, 2, 2.3, 3.7] {
+                let canvas = try makeCanvas(scale: scale, crop: initial, viewSize: viewSize)
+                let layout = try makeLayout(scale: scale, crop: initial, viewSize: viewSize)
+                canvas.isCropEditingEnabled = true
+                var crop: ImageRect?
+                canvas.onCrop = { crop = $0 }
+                let start = CGPoint(x: layout.cropRect.midX, y: layout.cropRect.midY)
+                let delta = CGPoint(
+                    x: layout.imageRect.maxX - layout.cropRect.maxX,
+                    y: layout.imageRect.maxY - layout.cropRect.maxY
+                )
+
+                canvas.beginInteraction(at: start)
+                canvas.endInteraction(at: CGPoint(x: start.x + delta.x, y: start.y + delta.y))
+
+                let maximum = try XCTUnwrap(crop, "scale \(scale), view \(viewSize)")
+                XCTAssertEqual(maximum.x, 0.6, accuracy: 0.000_000_001)
+                XCTAssertEqual(maximum.y, 0.6, accuracy: 0.000_000_001)
+                XCTAssertEqual(maximum.width, 0.4, accuracy: 0.000_000_001)
+                XCTAssertEqual(maximum.height, 0.4, accuracy: 0.000_000_001)
+            }
+        }
+    }
+
+    func testCanvasResizeCropToOddScaleEdges() throws {
+        let viewSize = CGSize(width: 333, height: 217)
+        let rightInitial = ImageRect(x: 0.2, y: 0.4, width: 0.4, height: 0.4)
+        let canvas = try makeCanvas(scale: 2, crop: rightInitial, viewSize: viewSize)
+        let rightLayout = try makeLayout(scale: 2, crop: rightInitial, viewSize: viewSize)
+        canvas.isCropEditingEnabled = true
+        var crops: [ImageRect] = []
+        canvas.onCrop = { crops.append($0) }
+
+        canvas.beginInteraction(at: CGPoint(x: rightLayout.cropRect.maxX - 1, y: rightLayout.cropRect.minY + 1))
+        canvas.endInteraction(at: CGPoint(x: rightLayout.imageRect.maxX, y: rightLayout.imageRect.minY))
+        let right = try XCTUnwrap(crops.last)
+        XCTAssertEqual(right.x, 0.2, accuracy: 0.000_000_001)
+        XCTAssertEqual(right.y, 0, accuracy: 0.000_000_001)
+        XCTAssertEqual(right.width, 0.8, accuracy: 0.000_000_001)
+        XCTAssertEqual(right.height, 0.8, accuracy: 0.000_000_001)
+        XCTAssertEqual((right.width * 200) / (right.height * 100), 2, accuracy: 0.000_000_001)
+
+        let leftInitial = ImageRect(x: 0.4, y: 0.4, width: 0.4, height: 0.4)
+        let leftLayout = try makeLayout(scale: 2, crop: leftInitial, viewSize: viewSize)
+        canvas.document?.cropRect = leftInitial
+        canvas.beginInteraction(at: CGPoint(x: leftLayout.cropRect.maxX - 1, y: leftLayout.cropRect.minY + 1))
+        canvas.endInteraction(at: CGPoint(x: leftLayout.imageRect.minX, y: leftLayout.imageRect.minY))
+        let left = try XCTUnwrap(crops.last)
+        XCTAssertEqual(left.x, 0, accuracy: 0.000_000_001)
+        XCTAssertEqual(left.y, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual(left.width, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual(left.height, 0.4, accuracy: 0.000_000_001)
+        XCTAssertEqual((left.width * 200) / (left.height * 100), 2, accuracy: 0.000_000_001)
+    }
+
+    func testCanvasResizeCanStartOnOutsideHalfOfEdgeHandle() throws {
+        let viewSize = CGSize(width: 333, height: 217)
+        let canvas = try makeCanvas(scale: 2, crop: .full, viewSize: viewSize)
+        let layout = try makeLayout(scale: 2, crop: .full, viewSize: viewSize)
+        canvas.isCropEditingEnabled = true
+        var crop: ImageRect?
+        canvas.onCrop = { crop = $0 }
+
+        canvas.beginInteraction(at: CGPoint(x: layout.imageRect.maxX + 2, y: layout.imageRect.minY - 2))
+        canvas.endInteraction(at: CGPoint(x: layout.imageRect.maxX - 40, y: layout.imageRect.minY + 20))
+
+        let resized = try XCTUnwrap(crop)
+        XCTAssertLessThan(resized.width, 1)
+        XCTAssertLessThan(resized.height, 1)
+        XCTAssertEqual((resized.width * 200) / (resized.height * 100), 2, accuracy: 0.000_000_001)
+    }
+
     private func makeCanvas(
         scale: Double = 1,
-        crop: ImageRect = .full
+        crop: ImageRect = .full,
+        viewSize: CGSize = CGSize(width: 400, height: 400)
     ) throws -> ImageCanvasView {
         let context = try XCTUnwrap(CGContext(
             data: nil,
@@ -296,7 +455,7 @@ final class ImageRendererTests: XCTestCase {
         ))
         let image = try XCTUnwrap(context.makeImage())
         let id = UUID().uuidString
-        let canvas = ImageCanvasView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        let canvas = ImageCanvasView(frame: NSRect(origin: .zero, size: viewSize))
         canvas.image = image
         canvas.document = ImageDocument(
             id: id,

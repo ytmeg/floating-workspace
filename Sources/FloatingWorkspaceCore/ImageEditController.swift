@@ -32,14 +32,21 @@ public final class ImageEditController: NSViewController {
     public var onExport: ((ImageDocument) -> Void)?
 
     private var annotationColor = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
+    private let imageDecoder: (URL) throws -> CGImage
+    private var cachedImage: (documentID: String, image: CGImage)?
 
-    public init(store: ImageDocumentStore) {
+    public init(
+        store: ImageDocumentStore,
+        imageDecoder: ((URL) throws -> CGImage)? = nil
+    ) {
         self.store = store
+        self.imageDecoder = imageDecoder ?? Self.decodeImage(at:)
         super.init(nibName: nil, bundle: nil)
         canvasView.onCrop = { [weak self] in self?.updateCrop($0) }
         canvasView.onPencil = { [weak self] in self?.addPencil(points: $0) }
         canvasView.onText = { [weak self] in self?.addText($0, at: $1) }
         canvasView.onArrow = { [weak self] in self?.addArrow(from: $0, to: $1) }
+        canvasView.textContentProvider = { [weak self] in self?.textField.stringValue ?? "" }
     }
 
     @available(*, unavailable)
@@ -60,16 +67,19 @@ public final class ImageEditController: NSViewController {
 
     public func importImage(at url: URL) throws {
         _ = try store.importImage(at: url)
+        cachedImage = nil
         refreshDocument()
     }
 
     public func replaceImage(at url: URL) throws {
         _ = try store.replaceImage(at: url)
+        cachedImage = nil
         refreshDocument()
     }
 
     public func deleteImage() throws {
         try store.deleteDocument()
+        cachedImage = nil
         setCropEditing(false)
         refreshDocument()
     }
@@ -106,7 +116,8 @@ public final class ImageEditController: NSViewController {
 
     @discardableResult
     public func updateCrop(_ crop: ImageRect) -> Bool {
-        guard Self.isValid(crop: crop, image: canvasView.image) else { return false }
+        guard let crop = ImageRenderer.Layout.normalizedUnitCrop(crop),
+              Self.hasOriginalAspect(crop: crop, image: canvasView.image) else { return false }
         let updated = store.update { $0.cropRect = crop }
         if updated { refreshDocument() }
         return updated
@@ -173,7 +184,7 @@ public final class ImageEditController: NSViewController {
         color: RGBAColor? = nil,
         width: Double = 2
     ) -> Bool {
-        guard Self.isValid(point: start), Self.isValid(point: end),
+        guard Self.isValid(point: start), Self.isValid(point: end), start != end,
               width.isFinite, width >= 0 else { return false }
         let annotation = ImageAnnotation.arrow(
             start: start,
@@ -215,18 +226,23 @@ public final class ImageEditController: NSViewController {
         replaceButton.isEnabled = document != nil
 
         guard let document else {
+            cachedImage = nil
             canvasView.image = nil
+            return
+        }
+        if let cachedImage, cachedImage.documentID == document.id {
+            canvasView.image = cachedImage.image
+            errorLabel.stringValue = ""
             return
         }
         do {
             let url = try store.managedURL(for: document)
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                throw Self.error("图片无法解码")
-            }
+            let image = try imageDecoder(url)
+            cachedImage = (documentID: document.id, image: image)
             canvasView.image = image
             errorLabel.stringValue = ""
         } catch {
+            cachedImage = nil
             canvasView.image = nil
             errorLabel.stringValue = error.localizedDescription
         }
@@ -343,16 +359,21 @@ public final class ImageEditController: NSViewController {
         (0...1).contains(point.x) && (0...1).contains(point.y)
     }
 
-    private static func isValid(crop: ImageRect, image: CGImage?) -> Bool {
-        guard crop.x.isFinite, crop.y.isFinite, crop.width.isFinite, crop.height.isFinite,
-              crop.x >= 0, crop.y >= 0, crop.width > 0, crop.height > 0,
-              crop.x + crop.width <= 1, crop.y + crop.height <= 1 else { return false }
+    private static func hasOriginalAspect(crop: ImageRect, image: CGImage?) -> Bool {
         guard let image else { return true }
         let pixelWidth = crop.width * Double(image.width)
         let pixelHeight = crop.height * Double(image.height)
         let originalAspect = Double(image.width) / Double(image.height)
         let cropAspect = pixelWidth / pixelHeight
         return abs(cropAspect - originalAspect) <= 0.000_001 * max(1, originalAspect)
+    }
+
+    private static func decodeImage(at url: URL) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw Self.error("图片无法解码")
+        }
+        return image
     }
 
     private static func error(_ message: String) -> NSError {

@@ -22,7 +22,11 @@ final class ImageEditControllerTests: XCTestCase {
     }
 
     func testImportReplaceDeleteUseDocumentStoreAndSharedPersistence() throws {
-        let fixture = try makeFixture()
+        var decodeCount = 0
+        let fixture = try makeFixture(imageDecoder: { url in
+            decodeCount += 1
+            return try Self.decodeImage(at: url)
+        })
         let sourceDirectory = fixture.workspace.deletingLastPathComponent()
         let firstSource = sourceDirectory.appendingPathComponent("first.png")
         let secondSource = sourceDirectory.appendingPathComponent("second.png")
@@ -34,6 +38,7 @@ final class ImageEditControllerTests: XCTestCase {
         let firstManaged = fixture.workspace.appendingPathComponent(first.originalRelativePath)
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstManaged.path))
         XCTAssertNotNil(fixture.controller.canvasView.image)
+        XCTAssertEqual(decodeCount, 1)
 
         try fixture.controller.replaceImage(at: secondSource)
         let second = try XCTUnwrap(fixture.contentStore.content.imageDocument)
@@ -41,6 +46,7 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertNotEqual(first.id, second.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstManaged.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: secondManaged.path))
+        XCTAssertEqual(decodeCount, 2)
 
         try fixture.controller.deleteImage()
 
@@ -48,6 +54,7 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertNil(fixture.controller.canvasView.image)
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstManaged.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: secondManaged.path))
+        XCTAssertEqual(decodeCount, 2)
         XCTAssertEqual(fixture.scheduler.delays, [0.3, 0.3, 0.3])
         fixture.scheduler.fire()
         XCTAssertNil(fixture.saver.snapshots.last?.imageDocument)
@@ -268,7 +275,82 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertEqual(controller.canvasView.superview, controller.view)
     }
 
-    private func makeFixture(document: ImageDocument? = nil) throws -> Fixture {
+    func testRepeatedEditsAndZoomDecodeImageOnlyOnce() throws {
+        var decodeCount = 0
+        let fixture = try makeFixture(document: makeDocument(), imageDecoder: { url in
+            decodeCount += 1
+            return try Self.decodeImage(at: url)
+        })
+        XCTAssertEqual(decodeCount, 1)
+
+        XCTAssertTrue(fixture.controller.addPencil(points: [ImagePoint(x: 0.2, y: 0.2)]))
+        XCTAssertTrue(fixture.controller.setDisplayScale(1.5))
+        XCTAssertTrue(fixture.controller.updateCrop(ImageRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)))
+        fixture.controller.refreshDocument()
+
+        XCTAssertEqual(decodeCount, 1)
+        XCTAssertEqual(fixture.scheduler.delays, [0.3, 0.3, 0.3])
+    }
+
+    func testArrowClickProducesNoCallbackAnnotationOrScheduledSave() throws {
+        let fixture = try makeFixture(document: makeDocument())
+        let controller = fixture.controller
+        controller.selectTool(.arrow)
+        controller.canvasView.frame = NSRect(x: 0, y: 0, width: 400, height: 400)
+        let layout = try XCTUnwrap(controller.canvasView.layout)
+        let point = layout.displayPoint(forNormalized: ImagePoint(x: 0.5, y: 0.5))
+        let controllerCallback = controller.canvasView.onArrow
+        var callbackCount = 0
+        controller.canvasView.onArrow = { start, end in
+            callbackCount += 1
+            controllerCallback?(start, end)
+        }
+        let original = fixture.contentStore.content
+
+        controller.canvasView.beginInteraction(at: point)
+        controller.canvasView.endInteraction(at: point)
+
+        XCTAssertEqual(callbackCount, 0)
+        XCTAssertEqual(fixture.contentStore.content, original)
+        XCTAssertTrue(fixture.scheduler.delays.isEmpty)
+    }
+
+    func testZeroLengthArrowActionDoesNotMutateOrScheduleSave() throws {
+        let fixture = try makeFixture(document: makeDocument())
+        let original = fixture.contentStore.content
+        let point = ImagePoint(x: 0.5, y: 0.5)
+
+        XCTAssertFalse(fixture.controller.addArrow(from: point, to: point))
+
+        XCTAssertEqual(fixture.contentStore.content, original)
+        XCTAssertTrue(fixture.scheduler.delays.isEmpty)
+    }
+
+    func testCanvasReadsTextFieldValueWithoutFiringAction() throws {
+        let fixture = try makeFixture(document: makeDocument())
+        let controller = fixture.controller
+        controller.selectTool(.text)
+        controller.canvasView.frame = NSRect(x: 0, y: 0, width: 400, height: 400)
+        controller.textField.stringValue = "typed without action"
+        let layout = try XCTUnwrap(controller.canvasView.layout)
+
+        controller.canvasView.beginInteraction(
+            at: layout.displayPoint(forNormalized: ImagePoint(x: 0.4, y: 0.5))
+        )
+
+        let annotation = try XCTUnwrap(fixture.contentStore.content.imageDocument?.annotations.last)
+        guard case let .text(content, _, _, position) = annotation else {
+            return XCTFail("Expected text annotation")
+        }
+        XCTAssertEqual(content, "typed without action")
+        XCTAssertEqual(position, ImagePoint(x: 0.4, y: 0.5))
+        XCTAssertEqual(fixture.scheduler.delays, [0.3])
+    }
+
+    private func makeFixture(
+        document: ImageDocument? = nil,
+        imageDecoder: ((URL) throws -> CGImage)? = nil
+    ) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let workspace = root.appendingPathComponent("Workspace")
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
@@ -290,7 +372,7 @@ final class ImageEditControllerTests: XCTestCase {
             workspaceDirectory: workspace,
             now: { Date(timeIntervalSinceReferenceDate: 1_000) }
         )
-        let controller = ImageEditController(store: documentStore)
+        let controller = ImageEditController(store: documentStore, imageDecoder: imageDecoder)
         controller.loadViewIfNeeded()
         return Fixture(
             controller: controller,
@@ -316,6 +398,11 @@ final class ImageEditControllerTests: XCTestCase {
             annotations: annotations,
             updatedAt: Date(timeIntervalSinceReferenceDate: 100)
         )
+    }
+
+    private static func decodeImage(at url: URL) throws -> CGImage {
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        return try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
     }
 
     private func writeImage(to url: URL) throws {

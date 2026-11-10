@@ -24,7 +24,7 @@ public enum ImageRenderer {
                   viewSize.width.isFinite, viewSize.height.isFinite,
                   viewSize.width > 0, viewSize.height > 0,
                   displayScale.isFinite, (0.1...4).contains(displayScale),
-                  Self.isValid(crop: crop) else { return nil }
+                  let crop = Self.normalizedUnitCrop(crop) else { return nil }
 
             self.originalSize = originalSize
             self.viewSize = viewSize
@@ -71,6 +71,11 @@ public enum ImageRenderer {
             )
         }
 
+        /// Baseline-left text anchor shared by canvas preview and export rendering.
+        public func textOrigin(forNormalized position: ImagePoint) -> CGPoint {
+            displayPoint(forNormalized: position)
+        }
+
         public func originalPoint(forNormalized point: ImagePoint) -> CGPoint {
             CGPoint(
                 x: CGFloat(point.x) * originalSize.width,
@@ -103,7 +108,7 @@ public enum ImageRenderer {
         }
 
         public func displayRect(forNormalizedCrop crop: ImageRect) -> CGRect? {
-            guard Self.isValid(crop: crop) else { return nil }
+            guard let crop = Self.normalizedUnitCrop(crop) else { return nil }
             return CGRect(
                 x: imageRect.minX + CGFloat(crop.x) * imageRect.width,
                 y: imageRect.minY + CGFloat(crop.y) * imageRect.height,
@@ -122,7 +127,7 @@ public enum ImageRenderer {
             let width = Double(visible.width / imageRect.width)
             let height = Double(visible.height / imageRect.height)
             let crop = ImageRect(x: x, y: y, width: width, height: height)
-            return Self.isValid(crop: crop) ? crop : nil
+            return Self.normalizedUnitCrop(crop)
         }
 
         /// Converts a drag into an aspect-preserving crop, clipping both endpoints to the image.
@@ -151,10 +156,20 @@ public enum ImageRenderer {
             return normalizedCrop(forDisplayRect: rect)
         }
 
-        private static func isValid(crop: ImageRect) -> Bool {
-            crop.x.isFinite && crop.y.isFinite && crop.width.isFinite && crop.height.isFinite &&
-            crop.x >= 0 && crop.y >= 0 && crop.width > 0 && crop.height > 0 &&
-            crop.x + crop.width <= 1 && crop.y + crop.height <= 1
+        static func normalizedUnitCrop(_ crop: ImageRect) -> ImageRect? {
+            let tolerance = 0.000_000_001
+            guard crop.x.isFinite, crop.y.isFinite, crop.width.isFinite, crop.height.isFinite,
+                  crop.x >= -tolerance, crop.y >= -tolerance,
+                  crop.width > 0, crop.height > 0,
+                  crop.width <= 1 + tolerance, crop.height <= 1 + tolerance,
+                  crop.x + crop.width <= 1 + tolerance,
+                  crop.y + crop.height <= 1 + tolerance else { return nil }
+            let width = min(crop.width, 1)
+            let height = min(crop.height, 1)
+            // Preserve dimensions (and therefore aspect) by moving only the origin back inside.
+            let x = min(max(crop.x, 0), 1 - width)
+            let y = min(max(crop.y, 0), 1 - height)
+            return ImageRect(x: x, y: y, width: width, height: height)
         }
 
         private static func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
