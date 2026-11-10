@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Darwin
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -58,6 +59,43 @@ final class ImageExporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: managedURL), fixture.managedOriginalBytes)
     }
 
+    func testDownscaledCanvasAndExportArrowheadsHaveSameOriginalPixelGeometry() throws {
+        let transparent = Pixel(red: 0, green: 0, blue: 0, alpha: 0)
+        let original = try makeImage(
+            width: 400,
+            height: 400,
+            pixels: Array(repeating: transparent, count: 400 * 400)
+        )
+        let arrow = ImageAnnotation.arrow(
+            start: ImagePoint(x: 0.1, y: 0.5),
+            end: ImagePoint(x: 0.9, y: 0.5),
+            color: RGBAColor(red: 0, green: 1, blue: 0, alpha: 1),
+            width: 2
+        )
+        let fixture = try makeFixture(original: original, annotations: [arrow])
+        let destination = fixture.root.appendingPathComponent("downscaled-arrow.png")
+        try ImageExporter(store: fixture.store).export(document: fixture.document, to: destination)
+
+        let canvas = ImageCanvasView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        canvas.image = original
+        canvas.document = fixture.document
+        let canvasContext = try makeContext(width: 100, height: 100)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: canvasContext, flipped: false)
+        canvas.draw(NSRect(x: 0, y: 0, width: 100, height: 100))
+        NSGraphicsContext.restoreGraphicsState()
+        let canvasImage = try XCTUnwrap(canvasContext.makeImage())
+        let canvasHeadHeight = try arrowHeadHeight(of: canvasImage)
+        let exportHeadHeight = try arrowHeadHeight(of: decodeImage(at: destination))
+
+        XCTAssertEqual(
+            Double(canvasHeadHeight * 4),
+            Double(exportHeadHeight),
+            accuracy: 0.51,
+            "100-point preview of a 400-pixel original must match export geometry scaled by 0.25"
+        )
+    }
+
     func testSinglePointPencilUsesAnnotationColorAtOriginalPixelPosition() throws {
         let white = Pixel(red: 255, green: 255, blue: 255, alpha: 255)
         let original = try makeImage(width: 8, height: 8, pixels: Array(repeating: white, count: 64))
@@ -105,7 +143,7 @@ final class ImageExporterTests: XCTestCase {
 
         let pixels = try rgbaPixels(of: decodeImage(at: destination))
         let green = Pixel(red: 0, green: 255, blue: 0, alpha: 255)
-        XCTAssertEqual(pixels[7 * 16 + 9], green, "shaft pixel")
+        XCTAssertEqual(pixels[7 * 16 + 3], green, "shaft-only pixel outside the arrowhead")
         XCTAssertEqual(pixels[5 * 16 + 6], green, "arrowhead-only pixel")
     }
 
@@ -200,7 +238,7 @@ final class ImageExporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: destination), oldBytes)
     }
 
-    func testRenderFailureDoesNotReplaceExistingDestinationBytes() throws {
+    func testCropValidationFailureDoesNotReplaceExistingDestinationBytes() throws {
         let fixture = try makeFixture()
         XCTAssertTrue(fixture.store.update { $0.cropRect.width = 0 })
         let document = try XCTUnwrap(fixture.store.document)
@@ -212,7 +250,26 @@ final class ImageExporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: destination), oldBytes)
     }
 
+    func testBitmapContextFailureDoesNotWriteDestination() throws {
+        let fixture = try makeFixture()
+        let destination = fixture.root.appendingPathComponent("render-failure.png")
+        let exporter = ImageExporter(store: fixture.store, renderer: { image, annotations, cropRect in
+            try ImageRenderer.render(
+                image: image,
+                annotations: annotations,
+                cropRect: cropRect,
+                contextFactory: { _, _, _ in nil }
+            )
+        })
+
+        XCTAssertThrowsError(try exporter.export(document: fixture.document, to: destination))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testUnwritableDestinationFailureDoesNotReplaceExistingBytes() throws {
+        if getuid() == 0 {
+            throw XCTSkip("POSIX permissions do not reject directory writes for root")
+        }
         let fixture = try makeFixture()
         let protectedDirectory = fixture.root.appendingPathComponent("Protected")
         try FileManager.default.createDirectory(at: protectedDirectory, withIntermediateDirectories: true)
@@ -238,6 +295,21 @@ final class ImageExporterTests: XCTestCase {
         let exported = try decodeImage(at: destination)
         XCTAssertEqual(exported.width, 2)
         XCTAssertEqual(exported.height, 2)
+    }
+
+    func testControllerExportWithoutDocumentThrowsAndDoesNotWriteDestination() throws {
+        let fixture = try makeFixture()
+        try fixture.store.deleteDocument()
+        let controller = ImageEditController(store: fixture.store)
+        let destination = fixture.root.appendingPathComponent("missing-document.png")
+
+        XCTAssertThrowsError(try controller.exportImage(to: destination)) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("没有可导出的图片"),
+                error.localizedDescription
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
     private func makeFixture(
@@ -304,6 +376,22 @@ final class ImageExporterTests: XCTestCase {
             space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ))
+    }
+
+    private func arrowHeadHeight(of image: CGImage) throws -> Int {
+        let pixels = try rgbaPixels(of: image)
+        let centerRow = image.height / 2
+        for row in 0..<centerRow {
+            for column in (image.width / 2)..<image.width {
+                let pixel = pixels[row * image.width + column]
+                let green = Int(pixel.green)
+                if green > 100, green > Int(pixel.red) + 50, green > Int(pixel.blue) + 50 {
+                    return centerRow - row
+                }
+            }
+        }
+        XCTFail("Expected green arrowhead pixels above the shaft")
+        return 0
     }
 
     /// Returns pixels in the bitmap's top-down row order.

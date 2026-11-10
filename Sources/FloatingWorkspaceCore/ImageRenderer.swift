@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Shared geometry for image preview and, later, pixel export.
+/// Shared geometry and drawing for image preview and pixel export.
 /// Normalized coordinates use a bottom-left origin, matching CoreGraphics.
 public enum ImageRenderer {
     public struct Layout: Equatable, Sendable {
@@ -63,6 +63,18 @@ public enum ImageRenderer {
 
         public var displayPointsPerOriginalPixel: CGFloat {
             imageRect.width / originalSize.width
+        }
+
+        func displayLineWidth(forOriginalWidth width: Double) -> CGFloat {
+            max(1, CGFloat(width)) * displayPointsPerOriginalPixel
+        }
+
+        func displayArrowheadLength(forOriginalWidth width: Double) -> CGFloat {
+            max(8, 3 * CGFloat(width)) * displayPointsPerOriginalPixel
+        }
+
+        func displayFontSize(forOriginalSize fontSize: Double) -> CGFloat {
+            max(1, CGFloat(fontSize)) * displayPointsPerOriginalPixel
         }
 
         public func displayPoint(forNormalized point: ImagePoint) -> CGPoint {
@@ -181,13 +193,16 @@ public enum ImageRenderer {
         }
     }
 
+    typealias BitmapContextFactory = (Int, Int, CGColorSpace) -> CGContext?
+
     /// Renders in original-image pixel coordinates. The context translation defines the
     /// export mapping: exportPixel = originalPixel - cropRect.origin, with no resampling.
     @MainActor
     static func render(
         image: CGImage,
         annotations: [ImageAnnotation],
-        cropRect: CGRect
+        cropRect: CGRect,
+        contextFactory: BitmapContextFactory? = nil
     ) throws -> CGImage {
         guard cropRect.origin.x.isFinite, cropRect.origin.y.isFinite,
               cropRect.width.isFinite, cropRect.height.isFinite,
@@ -202,16 +217,24 @@ public enum ImageRenderer {
             displayScale: 1,
             crop: .full,
             viewSize: originalSize
-        ), let context = CGContext(
-            data: nil,
-            width: Int(cropRect.width),
-            height: Int(cropRect.height),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                | CGBitmapInfo.byteOrder32Big.rawValue
         ) else {
+            throw error("无法创建图片渲染上下文", code: 1)
+        }
+        let context: CGContext?
+        if let contextFactory {
+            context = contextFactory(
+                Int(cropRect.width),
+                Int(cropRect.height),
+                colorSpace
+            )
+        } else {
+            context = makeBitmapContext(
+                width: Int(cropRect.width),
+                height: Int(cropRect.height),
+                colorSpace: colorSpace
+            )
+        }
+        guard let context else {
             throw error("无法创建图片渲染上下文", code: 1)
         }
 
@@ -231,7 +254,7 @@ public enum ImageRenderer {
     }
 
     @MainActor
-    private static func draw(
+    static func draw(
         _ annotation: ImageAnnotation,
         in context: CGContext,
         layout: Layout
@@ -242,7 +265,7 @@ public enum ImageRenderer {
         case let .pencil(points, color, width):
             guard let first = points.first else { return }
             let displayPoints = points.map(layout.displayPoint(forNormalized:))
-            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
+            let displayWidth = layout.displayLineWidth(forOriginalWidth: width)
             context.setStrokeColor(cgColor(color))
             context.setFillColor(cgColor(color))
             context.setLineWidth(displayWidth)
@@ -265,9 +288,7 @@ public enum ImageRenderer {
             context.strokePath()
         case let .text(content, color, fontSize, position):
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(
-                    ofSize: max(1, CGFloat(fontSize) * layout.displayPointsPerOriginalPixel)
-                ),
+                .font: NSFont.systemFont(ofSize: layout.displayFontSize(forOriginalSize: fontSize)),
                 .foregroundColor: nsColor(color)
             ]
             // Match the canvas exactly: this is the attributed text box's bottom-left,
@@ -277,7 +298,7 @@ public enum ImageRenderer {
         case let .arrow(start, end, color, width):
             let displayStart = layout.displayPoint(forNormalized: start)
             let displayEnd = layout.displayPoint(forNormalized: end)
-            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
+            let displayWidth = layout.displayLineWidth(forOriginalWidth: width)
             context.setStrokeColor(cgColor(color))
             context.setFillColor(cgColor(color))
             context.setLineWidth(displayWidth)
@@ -288,7 +309,7 @@ public enum ImageRenderer {
             context.strokePath()
 
             let angle = atan2(displayEnd.y - displayStart.y, displayEnd.x - displayStart.x)
-            let headLength = max(8, displayWidth * 3)
+            let headLength = layout.displayArrowheadLength(forOriginalWidth: width)
             let headAngle = CGFloat.pi / 6
             let first = CGPoint(
                 x: displayEnd.x - headLength * cos(angle - headAngle),
@@ -318,6 +339,23 @@ public enum ImageRenderer {
 
     private static func cgColor(_ color: RGBAColor) -> CGColor {
         nsColor(color).cgColor
+    }
+
+    private static func makeBitmapContext(
+        width: Int,
+        height: Int,
+        colorSpace: CGColorSpace
+    ) -> CGContext? {
+        CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        )
     }
 
     private static func error(_ message: String, code: Int) -> NSError {

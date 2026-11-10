@@ -161,14 +161,14 @@ public final class ImageCanvasView: NSView {
 
         context.draw(image, in: layout.imageRect)
         for annotation in document.annotations {
-            draw(annotation, in: context, layout: layout)
+            ImageRenderer.draw(annotation, in: context, layout: layout)
         }
         if case let .pencil(points) = interaction {
-            draw(.pencil(points: points, color: annotationColor, width: 2), in: context, layout: layout)
+            ImageRenderer.draw(.pencil(points: points, color: annotationColor, width: 2), in: context, layout: layout)
         }
         if case let .arrow(start, current) = interaction,
            let end = layout.normalizedPoint(forDisplay: current) {
-            draw(.arrow(start: start, end: end, color: annotationColor, width: 2), in: context, layout: layout)
+            ImageRenderer.draw(.arrow(start: start, end: end, color: annotationColor, width: 2), in: context, layout: layout)
         }
 
         let crop = editingCrop ?? document.cropRect
@@ -224,86 +224,4 @@ public final class ImageCanvasView: NSView {
         CGRect(x: cropRect.maxX - 5, y: cropRect.minY - 5, width: 10, height: 10)
     }
 
-    private func draw(
-        _ annotation: ImageAnnotation,
-        in context: CGContext,
-        layout: ImageRenderer.Layout
-    ) {
-        switch annotation {
-        case let .pencil(points, color, width):
-            guard let first = points.first else { return }
-            let displayPoints = points.map(layout.displayPoint(forNormalized:))
-            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
-            context.setStrokeColor(Self.cgColor(color))
-            context.setFillColor(Self.cgColor(color))
-            context.setLineWidth(displayWidth)
-            context.setLineCap(.round)
-            context.setLineJoin(.round)
-            if displayPoints.count == 1, let point = displayPoints.first {
-                context.fillEllipse(in: CGRect(
-                    x: point.x - displayWidth / 2,
-                    y: point.y - displayWidth / 2,
-                    width: displayWidth,
-                    height: displayWidth
-                ))
-                return
-            }
-            context.beginPath()
-            context.move(to: layout.displayPoint(forNormalized: first))
-            for point in displayPoints.dropFirst() {
-                context.addLine(to: point)
-            }
-            context.strokePath()
-        case let .text(content, color, fontSize, position):
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: max(1, CGFloat(fontSize) * layout.displayPointsPerOriginalPixel)),
-                .foregroundColor: Self.nsColor(color)
-            ]
-            NSAttributedString(string: content, attributes: attributes)
-                .draw(at: layout.textOrigin(forNormalized: position))
-        case let .arrow(start, end, color, width):
-            let displayStart = layout.displayPoint(forNormalized: start)
-            let displayEnd = layout.displayPoint(forNormalized: end)
-            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
-            context.setStrokeColor(Self.cgColor(color))
-            context.setFillColor(Self.cgColor(color))
-            context.setLineWidth(displayWidth)
-            context.setLineCap(.round)
-            context.beginPath()
-            context.move(to: displayStart)
-            context.addLine(to: displayEnd)
-            context.strokePath()
-
-            let angle = atan2(displayEnd.y - displayStart.y, displayEnd.x - displayStart.x)
-            let headLength = max(8, displayWidth * 3)
-            let headAngle = CGFloat.pi / 6
-            let first = CGPoint(
-                x: displayEnd.x - headLength * cos(angle - headAngle),
-                y: displayEnd.y - headLength * sin(angle - headAngle)
-            )
-            let second = CGPoint(
-                x: displayEnd.x - headLength * cos(angle + headAngle),
-                y: displayEnd.y - headLength * sin(angle + headAngle)
-            )
-            context.beginPath()
-            context.move(to: displayEnd)
-            context.addLine(to: first)
-            context.addLine(to: second)
-            context.closePath()
-            context.fillPath()
-        }
-    }
-
-    private static func nsColor(_ color: RGBAColor) -> NSColor {
-        NSColor(
-            srgbRed: color.red,
-            green: color.green,
-            blue: color.blue,
-            alpha: color.alpha
-        )
-    }
-
-    private static func cgColor(_ color: RGBAColor) -> CGColor {
-        nsColor(color).cgColor
-    }
 }

@@ -215,7 +215,9 @@ public final class ImageEditController: NSViewController {
     }
 
     public func exportImage(to destinationURL: URL) throws {
-        guard let document = store.document else { return }
+        guard let document = store.document else {
+            throw Self.error("没有可导出的图片")
+        }
         try ImageExporter(store: store).export(document: document, to: destinationURL)
     }
 

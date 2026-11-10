@@ -5,10 +5,21 @@ import UniformTypeIdentifiers
 
 @MainActor
 public struct ImageExporter {
+    typealias Renderer = (CGImage, [ImageAnnotation], CGRect) throws -> CGImage
+
     private let store: ImageDocumentStore
+    private let renderer: Renderer
 
     public init(store: ImageDocumentStore) {
         self.store = store
+        renderer = { image, annotations, cropRect in
+            try ImageRenderer.render(image: image, annotations: annotations, cropRect: cropRect)
+        }
+    }
+
+    init(store: ImageDocumentStore, renderer: @escaping Renderer) {
+        self.store = store
+        self.renderer = renderer
     }
 
     public func export(document: ImageDocument, to destinationURL: URL) throws {
@@ -32,11 +43,7 @@ public struct ImageExporter {
             throw Self.error("裁剪区域没有可导出的像素", code: 2)
         }
 
-        let rendered = try ImageRenderer.render(
-            image: image,
-            annotations: document.annotations,
-            cropRect: cropRect
-        )
+        let rendered = try renderer(image, document.annotations, cropRect)
         let pngData = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             pngData,
