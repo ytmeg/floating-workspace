@@ -30,15 +30,17 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
     public var blankBackground: RGBAColor
     public var isPinned: Bool
     public var webDrafts: [String: WebDraft]
+    public var imageDocument: ImageDocument?
 
     public static let `default` = WorkspaceContent(
-        schemaVersion: 2,
+        schemaVersion: 3,
         selectedMode: .note,
         noteText: "",
         blankTitle: "空白窗口",
         blankBackground: RGBAColor(red: 0.96, green: 0.97, blue: 0.98, alpha: 1),
         isPinned: true,
-        webDrafts: [:]
+        webDrafts: [:],
+        imageDocument: nil
     )
 
     public init(
@@ -48,7 +50,8 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
         blankTitle: String,
         blankBackground: RGBAColor,
         isPinned: Bool,
-        webDrafts: [String: WebDraft] = [:]
+        webDrafts: [String: WebDraft] = [:],
+        imageDocument: ImageDocument? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.selectedMode = selectedMode
@@ -57,10 +60,11 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
         self.blankBackground = blankBackground
         self.isPinned = isPinned
         self.webDrafts = webDrafts
+        self.imageDocument = imageDocument
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, selectedMode, noteText, blankTitle, blankBackground, isPinned, webDrafts
+        case schemaVersion, selectedMode, noteText, blankTitle, blankBackground, isPinned, webDrafts, imageDocument
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,6 +89,7 @@ public struct WorkspaceContent: Codable, Equatable, Sendable {
         } else {
             webDrafts = [:]
         }
+        imageDocument = try container.decodeIfPresent(ImageDocument.self, forKey: .imageDocument)
     }
 }
 

@@ -16,7 +16,7 @@ final class WebDraftTests: XCTestCase {
         try original.write(to: file)
         let store = WorkspaceFileStore(fileURL: file)
         let result = try store.load()
-        XCTAssertEqual(result.content.schemaVersion, 2)
+        XCTAssertEqual(result.content.schemaVersion, 3)
         XCTAssertEqual(result.content.noteText, "keep")
         XCTAssertEqual(result.content.selectedMode, .blank)
         XCTAssertFalse(result.content.isPinned)
@@ -53,7 +53,7 @@ final class WebDraftTests: XCTestCase {
         let result = try store.load()
 
         XCTAssertNil(replacementError)
-        XCTAssertEqual(result.content.schemaVersion, 2)
+        XCTAssertEqual(result.content.schemaVersion, 3)
         XCTAssertEqual(result.content.noteText, "original")
         XCTAssertEqual(try Data(contentsOf: existing), sentinel)
         let backup = try XCTUnwrap(result.migrationBackupURL)
@@ -114,7 +114,7 @@ final class WebDraftTests: XCTestCase {
 
     func testUnsupportedVersionUsesRecoveryPathWithoutSilentlyResetting() throws {
         let file = try temporaryFile()
-        let original = Data("{\"schemaVersion\":3,\"selectedMode\":\"blank\",\"noteText\":\"keep\",\"blankTitle\":\"title\",\"blankBackground\":{\"red\":1,\"green\":0,\"blue\":0,\"alpha\":1},\"isPinned\":false}".utf8)
+        let original = Data("{\"schemaVersion\":4,\"selectedMode\":\"blank\",\"noteText\":\"keep\",\"blankTitle\":\"title\",\"blankBackground\":{\"red\":1,\"green\":0,\"blue\":0,\"alpha\":1},\"isPinned\":false}".utf8)
         try original.write(to: file)
 
         let result = try WorkspaceFileStore(fileURL: file).load()

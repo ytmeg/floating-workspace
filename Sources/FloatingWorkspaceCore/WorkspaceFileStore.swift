@@ -28,16 +28,16 @@ public struct WorkspaceFileStore: WorkspacePersisting {
         }
 
         switch content.schemaVersion {
-        case 1:
+        case 1, 2:
             var migrated = content
-            migrated.schemaVersion = 2
+            migrated.schemaVersion = 3
             let backup = try writeMigrationBackup(data)
             return WorkspaceLoadResult(
                 content: migrated,
                 recoveryURL: nil,
                 migrationBackupURL: backup
             )
-        case 2:
+        case 3:
             return WorkspaceLoadResult(content: content, recoveryURL: nil)
         default:
             return try recoverOriginal()
@@ -108,7 +108,7 @@ public struct WorkspaceFileStore: WorkspacePersisting {
     }
 
     public func save(_ content: WorkspaceContent) throws {
-        guard content.schemaVersion == 2 else {
+        guard content.schemaVersion == 3 else {
             throw NSError(
                 domain: "WorkspaceFileStore",
                 code: 1,
@@ -136,6 +136,7 @@ public struct WorkspaceFileStore: WorkspacePersisting {
         normalized.blankBackground.green = min(max(normalized.blankBackground.green, 0), 1)
         normalized.blankBackground.blue = min(max(normalized.blankBackground.blue, 0), 1)
         normalized.blankBackground.alpha = min(max(normalized.blankBackground.alpha, 0), 1)
+        normalized.imageDocument = try content.imageDocument?.normalized()
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
