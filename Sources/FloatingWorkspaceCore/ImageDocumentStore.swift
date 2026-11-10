@@ -32,6 +32,8 @@ public struct ImageDocumentStore {
         try installImage(at: url)
     }
 
+    /// Creates a new document and UUID while retaining every previous managed copy for non-destructive history.
+    /// Replacement never deletes the old copy implicitly.
     public func replaceImage(at url: URL) throws -> ImageDocument {
         try installImage(at: url)
     }
@@ -49,12 +51,16 @@ public struct ImageDocumentStore {
         store.update { $0.imageDocument = nil }
     }
 
-    public func update(_ mutation: (inout ImageDocument) -> Void) {
-        guard var document = store.content.imageDocument else { return }
+    /// Normalizes and saves a mutation through the shared ContentStore.
+    /// Returns false without changing content or save state if no document exists or the mutation is invalid.
+    @discardableResult
+    public func update(_ mutation: (inout ImageDocument) -> Void) -> Bool {
+        guard var document = store.content.imageDocument else { return false }
         mutation(&document)
-        guard var normalized = try? document.normalized() else { return }
+        guard var normalized = try? document.normalized() else { return false }
         normalized.updatedAt = now()
         store.update { $0.imageDocument = normalized }
+        return true
     }
 
     public func managedURL(for document: ImageDocument) throws -> URL {
@@ -71,7 +77,9 @@ public struct ImageDocumentStore {
             .appendingPathComponent(document.originalRelativePath)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let expectedFile = expectedImages.appendingPathComponent(candidate.lastPathComponent)
+        let expectedFile = expectedImages.appendingPathComponent(
+            URL(fileURLWithPath: document.originalRelativePath).lastPathComponent
+        )
         guard candidate.path == expectedFile.path else {
             throw Self.error("Image path escapes the managed Images directory", code: 4)
         }
@@ -88,18 +96,26 @@ public struct ImageDocumentStore {
     }
 
     private func installImage(at url: URL) throws -> ImageDocument {
-        let pathExtension = url.pathExtension.lowercased()
-        guard url.isFileURL, Self.supportedExtensions.contains(pathExtension) else {
+        guard url.isFileURL else {
             throw Self.error("Only local PNG/JPEG images are supported", code: 1)
         }
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let resolvedSource = url.standardizedFileURL.resolvingSymlinksInPath()
+        let pathExtension = resolvedSource.pathExtension.lowercased()
+        guard Self.supportedExtensions.contains(pathExtension) else {
+            throw Self.error("Only local PNG/JPEG images are supported", code: 1)
+        }
+        let sourceResources = try resolvedSource.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard sourceResources.isRegularFile == true, sourceResources.isSymbolicLink != true else {
+            throw Self.error("Image source must be a regular file", code: 1)
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: resolvedSource.path)
         guard let size = (attributes[.size] as? NSNumber)?.uint64Value else {
             throw Self.error("Image file size could not be determined", code: 2)
         }
         guard size <= Self.maximumFileSize else {
             throw Self.error("Image exceeds the 50MB limit", code: 2)
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        guard let source = CGImageSourceCreateWithURL(resolvedSource as CFURL, nil),
               let sourceType = CGImageSourceGetType(source) as String?,
               sourceType == UTType.png.identifier || sourceType == UTType.jpeg.identifier,
               CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
@@ -114,7 +130,7 @@ public struct ImageDocumentStore {
             updatedAt: now()
         )
         let destination = try managedURL(for: document)
-        try copyAtomically(from: url, to: destination)
+        try copyAtomically(from: resolvedSource, to: destination)
         store.update { $0.imageDocument = document }
         return document
     }
@@ -124,6 +140,10 @@ public struct ImageDocumentStore {
             .appendingPathComponent(".\(UUID().uuidString)-image-import.tmp")
         defer { try? FileManager.default.removeItem(at: staged) }
         try FileManager.default.copyItem(at: source, to: staged)
+        let stagedResources = try staged.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard stagedResources.isRegularFile == true, stagedResources.isSymbolicLink != true else {
+            throw Self.error("Staged image must be a regular file", code: 4)
+        }
         // Staging and a same-directory hard link publish a complete copy without overwriting an existing UUID.
         try FileManager.default.linkItem(at: staged, to: destination)
     }

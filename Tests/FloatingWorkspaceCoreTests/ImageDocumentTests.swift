@@ -267,6 +267,29 @@ final class ImageDocumentTests: XCTestCase {
         }
     }
 
+    func testSymlinkSourceImportsResolvedBytesAsIndependentRegularFile() throws {
+        let directory = try temporaryDirectory()
+        let workspace = directory.appendingPathComponent("Workspace")
+        let resolvedSource = directory.appendingPathComponent("resolved.png")
+        let sourceLink = directory.appendingPathComponent("source-link.png")
+        try writeImage(to: resolvedSource, type: .png)
+        try FileManager.default.createSymbolicLink(at: sourceLink, withDestinationURL: resolvedSource)
+        let sourceBytes = try Data(contentsOf: resolvedSource)
+        let doubles = try ContentStoreTestDoubles()
+        let store = ImageDocumentStore(store: doubles.store, workspaceDirectory: workspace)
+
+        let document = try store.importImage(at: sourceLink)
+
+        let managed = workspace.appendingPathComponent(document.originalRelativePath)
+        let resources = try managed.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        XCTAssertEqual(resources.isRegularFile, true)
+        XCTAssertEqual(resources.isSymbolicLink, false)
+        XCTAssertEqual(try Data(contentsOf: managed), sourceBytes)
+        try FileManager.default.removeItem(at: resolvedSource)
+        XCTAssertEqual(try Data(contentsOf: managed), sourceBytes)
+        XCTAssertEqual(doubles.store.content.imageDocument, document)
+    }
+
     func testRejectedReplacementPreservesDocumentSourceAndManagedDirectory() throws {
         let directory = try temporaryDirectory()
         let workspace = directory.appendingPathComponent("Workspace")
@@ -452,6 +475,36 @@ final class ImageDocumentTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: external), sentinel)
     }
 
+    func testDeleteRejectsInternalSymlinkInsteadOfDeletingItsTarget() throws {
+        let directory = try temporaryDirectory()
+        let workspace = directory.appendingPathComponent("Workspace")
+        let images = workspace.appendingPathComponent("Images")
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        let id = UUID().uuidString
+        let otherID = UUID().uuidString
+        let link = images.appendingPathComponent("\(id).png")
+        let other = images.appendingPathComponent("\(otherID).png")
+        let sentinel = Data("other managed image".utf8)
+        try sentinel.write(to: other)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: other)
+        var content = WorkspaceContent.default
+        content.imageDocument = makeDocument(id: id)
+        let scheduler = ManualSaveScheduler()
+        let contentStore = try ContentStore(
+            loader: FakeWorkspaceLoader(content: content),
+            scheduler: scheduler,
+            saver: ControlledWorkspaceSaver()
+        )
+        let store = ImageDocumentStore(store: contentStore, workspaceDirectory: workspace)
+
+        XCTAssertThrowsError(try store.deleteDocument())
+
+        XCTAssertEqual(contentStore.content, content)
+        XCTAssertEqual(try Data(contentsOf: other), sentinel)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), other.path)
+        XCTAssertTrue(scheduler.delays.isEmpty)
+    }
+
     func testUnsafeImagePathCannotBeSavedOverExistingWorkspaceBytes() throws {
         let file = try temporaryDirectory().appendingPathComponent("workspace-v1.json")
         let store = WorkspaceFileStore(fileURL: file)
@@ -503,7 +556,7 @@ final class ImageDocumentTests: XCTestCase {
         _ = try store.importImage(at: source)
         date = Date(timeIntervalSinceReferenceDate: 500)
 
-        store.update {
+        let didUpdate = store.update {
             $0.displayScale = 8
             $0.cropRect = ImageRect(x: 0.9, y: -0.1, width: 0.3, height: 0.4)
             $0.annotations = [
@@ -516,6 +569,7 @@ final class ImageDocumentTests: XCTestCase {
             ]
         }
 
+        XCTAssertTrue(didUpdate)
         let document = try XCTUnwrap(doubles.store.content.imageDocument)
         XCTAssertEqual(document.displayScale, 4)
         assertRect(document.cropRect, equals: ImageRect(x: 0.9, y: 0, width: 0.1, height: 0.4))
@@ -538,9 +592,10 @@ final class ImageDocumentTests: XCTestCase {
             store: doubles.store,
             workspaceDirectory: directory.appendingPathComponent("Workspace")
         )
+        XCTAssertFalse(store.update { $0.displayScale = 2 })
         let original = try store.importImage(at: source)
 
-        store.update {
+        let emptyTextDidUpdate = store.update {
             $0.annotations = [
                 .text(
                     content: "  \n ",
@@ -550,8 +605,10 @@ final class ImageDocumentTests: XCTestCase {
                 )
             ]
         }
-        store.update { $0.displayScale = .nan }
+        let nonFiniteDidUpdate = store.update { $0.displayScale = .nan }
 
+        XCTAssertFalse(emptyTextDidUpdate)
+        XCTAssertFalse(nonFiniteDidUpdate)
         XCTAssertEqual(doubles.store.content.imageDocument, original)
         XCTAssertEqual(doubles.scheduler.delays, [0.3])
     }
