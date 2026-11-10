@@ -31,6 +31,11 @@ public final class ImageEditController: NSViewController {
     public var onReplaceRequest: (() -> Void)?
     /// Workspace integration presents the save panel and routes the chosen URL to exportImage(to:).
     public var onExport: ((ImageDocument) -> Void)?
+    /// Presents the delete confirmation; tests replace it to choose a button without a modal loop.
+    public var deleteConfirmationPresenter: (NSAlert) -> NSApplication.ModalResponse = { alert in
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal()
+    }
 
     private var annotationColor = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
     private let imageDecoder: (URL) throws -> CGImage
@@ -423,6 +428,17 @@ public final class ImageEditController: NSViewController {
     }
 
     @objc private func deleteRequested() {
+        guard store.document != nil else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "删除当前图片？"
+        alert.informativeText = "将删除工作区中的图片副本和全部标注，无法撤销。用户原文件不受影响。"
+        let cancelButton = alert.addButton(withTitle: "取消")
+        cancelButton.keyEquivalent = "\r"
+        let deleteButton = alert.addButton(withTitle: "删除")
+        deleteButton.hasDestructiveAction = true
+        deleteButton.keyEquivalent = ""
+        guard deleteConfirmationPresenter(alert) == .alertSecondButtonReturn else { return }
         do {
             try deleteImage()
         } catch {

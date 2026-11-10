@@ -374,6 +374,52 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertEqual(fixture.scheduler.delays, [0.3])
     }
 
+    func testDeleteButtonRequiresConfirmationBeforeRemovingManagedCopyAndAnnotations() throws {
+        let annotation = ImageAnnotation.pencil(
+            points: [ImagePoint(x: 0.5, y: 0.5)],
+            color: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1),
+            width: 2
+        )
+        let fixture = try makeFixture(document: makeDocument(annotations: [annotation]))
+        let controller = fixture.controller
+        let document = try XCTUnwrap(fixture.contentStore.content.imageDocument)
+        let managed = fixture.workspace.appendingPathComponent(document.originalRelativePath)
+        let managedBytes = try Data(contentsOf: managed)
+        var alerts: [NSAlert] = []
+        var response = NSApplication.ModalResponse.alertFirstButtonReturn
+        controller.deleteConfirmationPresenter = { alert in
+            alerts.append(alert)
+            return response
+        }
+        func clickDelete() {
+            XCTAssertTrue(controller.deleteButton.isEnabled)
+            _ = controller.deleteButton.target?.perform(controller.deleteButton.action, with: controller.deleteButton)
+        }
+
+        clickDelete()
+
+        XCTAssertEqual(alerts.count, 1)
+        let alert = try XCTUnwrap(alerts.first)
+        XCTAssertEqual(alert.alertStyle, .warning)
+        XCTAssertEqual(alert.buttons.map(\.title), ["取消", "删除"])
+        XCTAssertTrue(alert.buttons[1].hasDestructiveAction)
+        XCTAssertFalse(alert.messageText.isEmpty)
+        XCTAssertEqual(fixture.contentStore.content.imageDocument, document)
+        XCTAssertEqual(try Data(contentsOf: managed), managedBytes)
+        XCTAssertNotNil(controller.canvasView.image)
+        XCTAssertTrue(fixture.scheduler.delays.isEmpty)
+        XCTAssertFalse(fixture.contentStore.isDirty)
+
+        response = .alertSecondButtonReturn
+        clickDelete()
+
+        XCTAssertEqual(alerts.count, 2)
+        XCTAssertNil(fixture.contentStore.content.imageDocument)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path))
+        XCTAssertNil(controller.canvasView.image)
+        XCTAssertEqual(fixture.scheduler.delays, [0.3])
+    }
+
     func testCanvasAnnotationSizesStayReadableOnLargeImageInSmallViewport() throws {
         let largeImage = try XCTUnwrap(CGContext(
             data: nil,
