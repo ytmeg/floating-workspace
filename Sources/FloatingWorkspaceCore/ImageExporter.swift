@@ -25,9 +25,8 @@ public struct ImageExporter {
     public func export(document: ImageDocument, to destinationURL: URL) throws {
         let document = try document.normalized()
         let sourceURL = try store.managedURL(for: document)
-        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let crop = ImageRenderer.Layout.normalizedUnitCrop(document.cropRect) else {
+        let image = try ImageDecoding.decodeImage(at: sourceURL)
+        guard let crop = ImageRenderer.Layout.normalizedUnitCrop(document.cropRect) else {
             throw Self.error("图片无法解码或裁剪区域无效", code: 1)
         }
 

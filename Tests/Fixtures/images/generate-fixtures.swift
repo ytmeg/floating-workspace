@@ -68,3 +68,60 @@ for (name, type) in [("colored.png", UTType.png), ("colored.jpg", UTType.jpeg)] 
     print(url.path)
 }
 print("16x12; " + quadrants.joined(separator: "; "))
+
+// A phone-style JPEG: stored pixels are the upright fixture rotated 90 degrees counter-clockwise,
+// tagged EXIF orientation 6 so a viewer must rotate it clockwise to show colored.png upright.
+let storedWidth = height
+let storedHeight = width
+var storedPixels = [UInt8](repeating: 255, count: storedWidth * storedHeight * 4)
+for memoryY in 0..<storedHeight {
+    for x in 0..<storedWidth {
+        let offset = (memoryY * storedWidth + x) * 4
+        let isTop = memoryY < storedHeight / 2
+        let isRight = x >= storedWidth / 2
+        let rgb: (UInt8, UInt8, UInt8)
+        switch (isTop, isRight) {
+        case (true, false): rgb = (0, 255, 0)
+        case (true, true): rgb = (255, 255, 0)
+        case (false, false): rgb = (255, 0, 0)
+        case (false, true): rgb = (0, 0, 255)
+        }
+        storedPixels[offset] = rgb.0
+        storedPixels[offset + 1] = rgb.1
+        storedPixels[offset + 2] = rgb.2
+    }
+}
+guard let storedProvider = CGDataProvider(data: Data(storedPixels) as CFData), let storedImage = CGImage(
+    width: storedWidth,
+    height: storedHeight,
+    bitsPerComponent: 8,
+    bitsPerPixel: 32,
+    bytesPerRow: storedWidth * 4,
+    space: colorSpace,
+    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+    provider: storedProvider,
+    decode: nil,
+    shouldInterpolate: false,
+    intent: .defaultIntent
+) else {
+    fatalError("Could not create rotated fixture image")
+}
+let rotatedURL = outputDirectory.appendingPathComponent("rotated-orientation-6.jpg")
+guard let rotatedDestination = CGImageDestinationCreateWithURL(
+    rotatedURL as CFURL,
+    UTType.jpeg.identifier as CFString,
+    1,
+    nil
+) else {
+    fatalError("Could not create rotated-orientation-6.jpg destination")
+}
+CGImageDestinationAddImage(rotatedDestination, storedImage, [
+    kCGImageDestinationLossyCompressionQuality: 1.0,
+    kCGImagePropertyOrientation: 6,
+    kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFOrientation: 6]
+] as [CFString: Any] as CFDictionary)
+guard CGImageDestinationFinalize(rotatedDestination) else {
+    fatalError("Could not finalize rotated-orientation-6.jpg")
+}
+print(rotatedURL.path)
+print("12x16 stored, EXIF orientation 6; displays upright as colored.png")

@@ -117,8 +117,12 @@ public struct ImageDocumentStore {
         }
         guard let source = CGImageSourceCreateWithURL(resolvedSource as CFURL, nil),
               let sourceType = CGImageSourceGetType(source) as String?,
-              sourceType == UTType.png.identifier || sourceType == UTType.jpeg.identifier,
-              CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
+              sourceType == UTType.png.identifier || sourceType == UTType.jpeg.identifier else {
+            throw Self.error("Image data could not be decoded as PNG/JPEG", code: 3)
+        }
+        // Header-only size check first so an oversized image is rejected before any bitmap allocation.
+        try ImageDecoding.validateDimensions(of: source)
+        guard (try? ImageDecoding.decodeImage(from: source)) != nil else {
             throw Self.error("Image data could not be decoded as PNG/JPEG", code: 3)
         }
 

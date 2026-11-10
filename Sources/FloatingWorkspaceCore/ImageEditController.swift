@@ -41,7 +41,7 @@ public final class ImageEditController: NSViewController {
         imageDecoder: ((URL) throws -> CGImage)? = nil
     ) {
         self.store = store
-        self.imageDecoder = imageDecoder ?? Self.decodeImage(at:)
+        self.imageDecoder = imageDecoder ?? ImageDecoding.decodeImage(at:)
         super.init(nibName: nil, bundle: nil)
         canvasView.onCrop = { [weak self] in self?.updateCrop($0) }
         canvasView.onPencil = { [weak self] in self?.addPencil(points: $0) }
@@ -400,14 +400,6 @@ public final class ImageEditController: NSViewController {
         let originalAspect = Double(image.width) / Double(image.height)
         let cropAspect = pixelWidth / pixelHeight
         return abs(cropAspect - originalAspect) <= 0.000_001 * max(1, originalAspect)
-    }
-
-    private static func decodeImage(at url: URL) throws -> CGImage {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            throw Self.error("图片无法解码")
-        }
-        return image
     }
 
     private static func error(_ message: String) -> NSError {
