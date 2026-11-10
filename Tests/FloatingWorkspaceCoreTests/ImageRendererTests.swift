@@ -495,6 +495,83 @@ final class ImageRendererTests: XCTestCase {
         assertPoint(canvas.contentLayoutOffset, x: 0, y: 0)
     }
 
+    func testPreviewClipsImageAndAnnotationsToCropOutsideCropEditing() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 200,
+            height: 100,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        let id = UUID().uuidString
+        let canvas = ImageCanvasView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        canvas.image = try XCTUnwrap(context.makeImage())
+        // Top-right quarter crop; the stroke at y=0.75 runs across the whole image, outside the crop too.
+        canvas.document = ImageDocument(
+            id: id,
+            originalRelativePath: "Images/\(id).png",
+            cropRect: ImageRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5),
+            annotations: [.pencil(
+                points: [ImagePoint(x: 0, y: 0.75), ImagePoint(x: 1, y: 0.75)],
+                color: RGBAColor(red: 0, green: 0, blue: 1, alpha: 1),
+                width: 10
+            )]
+        )
+        let insideImage = CGPoint(x: 300, y: 225)
+        let outsideImage = CGPoint(x: 100, y: 150)
+        let insideStroke = CGPoint(x: 300, y: 250)
+        let outsideStroke = CGPoint(x: 100, y: 250)
+
+        let preview = try renderedColors(of: canvas, at: [insideImage, outsideImage, insideStroke, outsideStroke])
+        XCTAssertTrue(isRed(preview[0]), "inside crop shows the image: \(preview[0])")
+        XCTAssertFalse(isRed(preview[1]), "outside crop hides the image: \(preview[1])")
+        XCTAssertTrue(isBlue(preview[2]), "inside crop shows the stroke: \(preview[2])")
+        XCTAssertFalse(isBlue(preview[3]), "outside crop hides annotation overflow: \(preview[3])")
+        XCTAssertFalse(isRed(preview[3]), "outside crop stays background: \(preview[3])")
+
+        canvas.isCropEditingEnabled = true
+        let editing = try renderedColors(of: canvas, at: [insideImage, outsideImage, insideStroke, outsideStroke])
+        XCTAssertTrue(isRed(editing[0]))
+        XCTAssertTrue(isRed(editing[1]), "crop editing still shows the full image: \(editing[1])")
+        XCTAssertTrue(isBlue(editing[2]))
+        XCTAssertTrue(isBlue(editing[3]), "crop editing still shows every annotation: \(editing[3])")
+
+        // Hit testing still maps the full image while cropped and not editing.
+        var received: [ImagePoint] = []
+        canvas.isCropEditingEnabled = false
+        canvas.onPencil = { points, _ in received = points }
+        canvas.beginInteraction(at: outsideImage)
+        canvas.endInteraction(at: outsideImage)
+        XCTAssertEqual(received, [ImagePoint(x: 0.25, y: 0.25), ImagePoint(x: 0.25, y: 0.25)])
+    }
+
+    private func renderedColors(of canvas: ImageCanvasView, at points: [CGPoint]) throws -> [NSColor] {
+        let rep = try XCTUnwrap(canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds))
+        canvas.cacheDisplay(in: canvas.bounds, to: rep)
+        let scaleX = CGFloat(rep.pixelsWide) / canvas.bounds.width
+        let scaleY = CGFloat(rep.pixelsHigh) / canvas.bounds.height
+        return try points.map { point in
+            // Bitmap rows run top-down while the canvas is not flipped.
+            let color = try XCTUnwrap(rep.colorAt(
+                x: Int(point.x * scaleX),
+                y: Int((canvas.bounds.height - point.y) * scaleY)
+            ))
+            return try XCTUnwrap(color.usingColorSpace(.sRGB))
+        }
+    }
+
+    private func isRed(_ color: NSColor) -> Bool {
+        color.redComponent > 0.8 && color.greenComponent < 0.2 && color.blueComponent < 0.2
+    }
+
+    private func isBlue(_ color: NSColor) -> Bool {
+        color.blueComponent > 0.8 && color.redComponent < 0.2 && color.greenComponent < 0.2
+    }
+
     private func makeCanvas(
         scale: Double = 1,
         crop: ImageRect = .full,

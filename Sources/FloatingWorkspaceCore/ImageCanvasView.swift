@@ -212,6 +212,11 @@ public final class ImageCanvasView: NSView {
         context.saveGState()
         defer { context.restoreGState() }
         context.translateBy(x: contentLayoutOffset.x, y: contentLayoutOffset.y)
+        context.saveGState()
+        // Outside crop editing the preview shows exactly what export keeps, annotation overflow included.
+        if !isCropEditingEnabled {
+            context.clip(to: layout.cropRect)
+        }
         context.draw(image, in: layout.imageRect)
         for annotation in document.annotations {
             ImageRenderer.draw(annotation, in: context, layout: layout)
@@ -219,6 +224,7 @@ public final class ImageCanvasView: NSView {
         if let inProgressAnnotation {
             ImageRenderer.draw(inProgressAnnotation, in: context, layout: layout)
         }
+        context.restoreGState()
 
         let crop = editingCrop ?? document.cropRect
         if let cropRect = layout.displayRect(forNormalizedCrop: crop) {
