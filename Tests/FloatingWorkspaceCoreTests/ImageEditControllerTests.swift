@@ -328,9 +328,9 @@ final class ImageEditControllerTests: XCTestCase {
         let point = layout.displayPoint(forNormalized: ImagePoint(x: 0.5, y: 0.5))
         let controllerCallback = controller.canvasView.onArrow
         var callbackCount = 0
-        controller.canvasView.onArrow = { start, end in
+        controller.canvasView.onArrow = { start, end, width in
             callbackCount += 1
-            controllerCallback?(start, end)
+            controllerCallback?(start, end, width)
         }
         let original = fixture.contentStore.content
 
@@ -372,6 +372,70 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertEqual(content, "typed without action")
         XCTAssertEqual(position, ImagePoint(x: 0.4, y: 0.5))
         XCTAssertEqual(fixture.scheduler.delays, [0.3])
+    }
+
+    func testCanvasAnnotationSizesStayReadableOnLargeImageInSmallViewport() throws {
+        let largeImage = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 3_000,
+            height: 2_000,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )?.makeImage())
+        let fixture = try makeFixture(document: makeDocument(), imageDecoder: { _ in largeImage })
+        let canvas = fixture.controller.canvasView
+        canvas.updateViewportSize(CGSize(width: 500, height: 400))
+        let layout = try XCTUnwrap(canvas.layout)
+        XCTAssertEqual(layout.displayPointsPerOriginalPixel, 500.0 / 3_000.0, accuracy: 0.000_001)
+        func canvasPoint(_ x: Double, _ y: Double) -> CGPoint {
+            let display = layout.displayPoint(forNormalized: ImagePoint(x: x, y: y))
+            return CGPoint(
+                x: display.x + canvas.contentLayoutOffset.x,
+                y: display.y + canvas.contentLayoutOffset.y
+            )
+        }
+
+        fixture.controller.selectTool(.pencil)
+        canvas.beginInteraction(at: canvasPoint(0.2, 0.2))
+        canvas.continueInteraction(at: canvasPoint(0.4, 0.4))
+        guard case let .pencil(_, _, inProgressPencilWidth) = try XCTUnwrap(canvas.inProgressAnnotation) else {
+            return XCTFail("Expected in-progress pencil")
+        }
+        XCTAssertGreaterThanOrEqual(layout.displayLineWidth(forOriginalWidth: inProgressPencilWidth), 1.5)
+        canvas.endInteraction(at: canvasPoint(0.5, 0.5))
+        XCTAssertNil(canvas.inProgressAnnotation)
+
+        fixture.controller.selectTool(.arrow)
+        canvas.beginInteraction(at: canvasPoint(0.1, 0.8))
+        canvas.continueInteraction(at: canvasPoint(0.6, 0.3))
+        guard case let .arrow(_, _, _, inProgressArrowWidth) = try XCTUnwrap(canvas.inProgressAnnotation) else {
+            return XCTFail("Expected in-progress arrow")
+        }
+        XCTAssertGreaterThanOrEqual(layout.displayLineWidth(forOriginalWidth: inProgressArrowWidth), 1.5)
+        canvas.endInteraction(at: canvasPoint(0.7, 0.2))
+
+        fixture.controller.selectTool(.text)
+        fixture.controller.textField.stringValue = "readable"
+        canvas.beginInteraction(at: canvasPoint(0.5, 0.5))
+
+        let annotations = try XCTUnwrap(fixture.contentStore.content.imageDocument?.annotations)
+        XCTAssertEqual(annotations.count, 3)
+        guard case let .pencil(_, _, pencilWidth) = annotations[0],
+              case let .arrow(_, _, _, arrowWidth) = annotations[1],
+              case let .text(_, _, fontSize, _) = annotations[2] else {
+            return XCTFail("Expected pencil, arrow and text annotations")
+        }
+        XCTAssertEqual(pencilWidth, inProgressPencilWidth)
+        XCTAssertEqual(arrowWidth, inProgressArrowWidth)
+        XCTAssertGreaterThanOrEqual(layout.displayLineWidth(forOriginalWidth: pencilWidth), 1.5)
+        XCTAssertGreaterThanOrEqual(layout.displayLineWidth(forOriginalWidth: arrowWidth), 1.5)
+        XCTAssertGreaterThanOrEqual(layout.displayFontSize(forOriginalSize: fontSize), 12)
+        XCTAssertGreaterThan(
+            layout.displayArrowheadLength(forOriginalWidth: arrowWidth),
+            layout.displayLineWidth(forOriginalWidth: arrowWidth)
+        )
     }
 
     private func makeFixture(

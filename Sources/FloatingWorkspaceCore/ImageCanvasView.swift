@@ -23,9 +23,13 @@ public final class ImageCanvasView: NSView {
     public var annotationColor = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
 
     public var onCrop: ((ImageRect) -> Void)?
-    public var onPencil: (([ImagePoint]) -> Void)?
-    public var onText: ((String, ImagePoint) -> Void)?
-    public var onArrow: ((ImagePoint, ImagePoint) -> Void)?
+    /// Sizes are in original pixels, converted from fixed screen sizes at creation time.
+    public var onPencil: (([ImagePoint], Double) -> Void)?
+    public var onText: ((String, ImagePoint, Double) -> Void)?
+    public var onArrow: ((ImagePoint, ImagePoint, Double) -> Void)?
+
+    static let screenStrokeWidth: CGFloat = 2
+    static let screenFontSize: CGFloat = 16
 
     private enum CropInteraction {
         case new
@@ -34,8 +38,8 @@ public final class ImageCanvasView: NSView {
     }
 
     private enum Interaction {
-        case pencil([ImagePoint])
-        case arrow(start: ImagePoint, current: CGPoint)
+        case pencil([ImagePoint], width: Double)
+        case arrow(start: ImagePoint, current: CGPoint, width: Double)
         case crop(kind: CropInteraction, start: CGPoint)
     }
 
@@ -115,13 +119,21 @@ public final class ImageCanvasView: NSView {
         switch tool {
         case .pencil:
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
-            interaction = .pencil([normalized])
+            interaction = .pencil([normalized], width: Self.originalSize(Self.screenStrokeWidth, layout: layout))
         case .text:
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
-            onText?(textContentProvider?() ?? textContent, normalized)
+            onText?(
+                textContentProvider?() ?? textContent,
+                normalized,
+                Self.originalSize(Self.screenFontSize, layout: layout)
+            )
         case .arrow:
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
-            interaction = .arrow(start: normalized, current: point)
+            interaction = .arrow(
+                start: normalized,
+                current: point,
+                width: Self.originalSize(Self.screenStrokeWidth, layout: layout)
+            )
         }
     }
 
@@ -129,11 +141,11 @@ public final class ImageCanvasView: NSView {
         let point = layoutPoint(forCanvasPoint: point)
         guard let layout, let interaction else { return }
         switch interaction {
-        case let .pencil(points):
+        case let .pencil(points, width):
             guard let normalized = layout.normalizedPoint(forDisplay: point) else { return }
-            self.interaction = .pencil(points + [normalized])
-        case let .arrow(start, _):
-            self.interaction = .arrow(start: start, current: point)
+            self.interaction = .pencil(points + [normalized], width: width)
+        case let .arrow(start, _, width):
+            self.interaction = .arrow(start: start, current: point, width: width)
         case let .crop(kind, start):
             editingCrop = crop(for: kind, start: start, current: point, layout: layout)
         }
@@ -144,7 +156,7 @@ public final class ImageCanvasView: NSView {
         let point = layoutPoint(forCanvasPoint: point)
         guard let layout, let interaction else { return }
         switch interaction {
-        case let .pencil(points):
+        case let .pencil(points, width):
             let finalPoints: [ImagePoint]
             if let normalized = layout.normalizedPoint(forDisplay: point) {
                 finalPoints = points + [normalized]
@@ -153,16 +165,16 @@ public final class ImageCanvasView: NSView {
             }
             self.interaction = nil
             if !finalPoints.isEmpty {
-                onPencil?(finalPoints)
+                onPencil?(finalPoints, width)
             }
-        case let .arrow(start, _):
+        case let .arrow(start, _, width):
             self.interaction = nil
             if let end = layout.normalizedPoint(forDisplay: point) {
                 let displayStart = layout.displayPoint(forNormalized: start)
                 let displayEnd = layout.displayPoint(forNormalized: end)
                 let displayLength = hypot(displayEnd.x - displayStart.x, displayEnd.y - displayStart.y)
                 if displayLength >= 1 {
-                    onArrow?(start, end)
+                    onArrow?(start, end, width)
                 }
             }
         case let .crop(kind, start):
@@ -174,6 +186,20 @@ public final class ImageCanvasView: NSView {
             }
         }
         needsDisplay = true
+    }
+
+    /// The annotation being dragged, drawn with the same model value that will be persisted.
+    var inProgressAnnotation: ImageAnnotation? {
+        guard let layout else { return nil }
+        switch interaction {
+        case let .pencil(points, width):
+            return .pencil(points: points, color: annotationColor, width: width)
+        case let .arrow(start, current, width):
+            guard let end = layout.normalizedPoint(forDisplay: current) else { return nil }
+            return .arrow(start: start, end: end, color: annotationColor, width: width)
+        case .crop, nil:
+            return nil
+        }
     }
 
     public override func draw(_ dirtyRect: NSRect) {
@@ -190,12 +216,8 @@ public final class ImageCanvasView: NSView {
         for annotation in document.annotations {
             ImageRenderer.draw(annotation, in: context, layout: layout)
         }
-        if case let .pencil(points) = interaction {
-            ImageRenderer.draw(.pencil(points: points, color: annotationColor, width: 2), in: context, layout: layout)
-        }
-        if case let .arrow(start, current) = interaction,
-           let end = layout.normalizedPoint(forDisplay: current) {
-            ImageRenderer.draw(.arrow(start: start, end: end, color: annotationColor, width: 2), in: context, layout: layout)
+        if let inProgressAnnotation {
+            ImageRenderer.draw(inProgressAnnotation, in: context, layout: layout)
         }
 
         let crop = editingCrop ?? document.cropRect
@@ -245,6 +267,11 @@ public final class ImageCanvasView: NSView {
                 height: initialRect.height
             ))
         }
+    }
+
+    /// Converts a fixed on-screen size to original pixels for the current fit and zoom.
+    private static func originalSize(_ screenSize: CGFloat, layout: ImageRenderer.Layout) -> Double {
+        Double(screenSize / layout.displayPointsPerOriginalPixel)
     }
 
     private func resizeHandle(for cropRect: CGRect) -> CGRect {

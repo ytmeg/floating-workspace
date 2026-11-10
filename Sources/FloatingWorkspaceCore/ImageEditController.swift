@@ -44,9 +44,9 @@ public final class ImageEditController: NSViewController {
         self.imageDecoder = imageDecoder ?? ImageDecoding.decodeImage(at:)
         super.init(nibName: nil, bundle: nil)
         canvasView.onCrop = { [weak self] in self?.updateCrop($0) }
-        canvasView.onPencil = { [weak self] in self?.addPencil(points: $0) }
-        canvasView.onText = { [weak self] in self?.addText($0, at: $1) }
-        canvasView.onArrow = { [weak self] in self?.addArrow(from: $0, to: $1) }
+        canvasView.onPencil = { [weak self] in self?.addPencil(points: $0, width: $1) }
+        canvasView.onText = { [weak self] in self?.addText($0, at: $1, fontSize: $2) }
+        canvasView.onArrow = { [weak self] in self?.addArrow(from: $0, to: $1, width: $2) }
         canvasView.textContentProvider = { [weak self] in self?.textField.stringValue ?? "" }
     }
 

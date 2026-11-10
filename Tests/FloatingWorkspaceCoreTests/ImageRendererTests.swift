@@ -221,9 +221,9 @@ final class ImageRendererTests: XCTestCase {
         var pencil: [ImagePoint] = []
         var text: (content: String, position: ImagePoint)?
         var arrow: (start: ImagePoint, end: ImagePoint)?
-        canvas.onPencil = { pencil = $0 }
-        canvas.onText = { text = ($0, $1) }
-        canvas.onArrow = { arrow = ($0, $1) }
+        canvas.onPencil = { points, _ in pencil = points }
+        canvas.onText = { content, position, _ in text = (content, position) }
+        canvas.onArrow = { start, end, _ in arrow = (start, end) }
 
         canvas.tool = .pencil
         canvas.beginInteraction(at: layout.displayPoint(forNormalized: ImagePoint(x: 0.1, y: 0.2)))
@@ -254,9 +254,9 @@ final class ImageRendererTests: XCTestCase {
         let canvas = try makeCanvas()
         let layout = try makeLayout()
         var callbackCount = 0
-        canvas.onPencil = { _ in callbackCount += 1 }
-        canvas.onText = { _, _ in callbackCount += 1 }
-        canvas.onArrow = { _, _ in callbackCount += 1 }
+        canvas.onPencil = { _, _ in callbackCount += 1 }
+        canvas.onText = { _, _, _ in callbackCount += 1 }
+        canvas.onArrow = { _, _, _ in callbackCount += 1 }
 
         canvas.tool = .pencil
         canvas.beginInteraction(at: CGPoint(x: -1, y: 10))
@@ -449,7 +449,7 @@ final class ImageRendererTests: XCTestCase {
 
         for expected in [ImagePoint(x: 0, y: 0), ImagePoint(x: 1, y: 1)] {
             var received: [ImagePoint] = []
-            canvas.onPencil = { received = $0 }
+            canvas.onPencil = { points, _ in received = points }
             canvas.tool = .pencil
             let display = layout.displayPoint(forNormalized: expected)
             let point = CGPoint(
