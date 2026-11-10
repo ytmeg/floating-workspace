@@ -439,6 +439,62 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertEqual((resized.width * 200) / (resized.height * 100), 2, accuracy: 0.000_000_001)
     }
 
+    func testViewportBackedCanvasMakesEveryZoomedImageEdgeEditable() throws {
+        let canvas = try makeCanvas(scale: 2)
+        canvas.updateViewportSize(CGSize(width: 400, height: 400))
+        let layout = try makeLayout(scale: 2)
+
+        XCTAssertEqual(canvas.frame.size, CGSize(width: 800, height: 400))
+        assertPoint(canvas.contentLayoutOffset, x: 200, y: 0)
+
+        for expected in [ImagePoint(x: 0, y: 0), ImagePoint(x: 1, y: 1)] {
+            var received: [ImagePoint] = []
+            canvas.onPencil = { received = $0 }
+            canvas.tool = .pencil
+            let display = layout.displayPoint(forNormalized: expected)
+            let point = CGPoint(
+                x: display.x + canvas.contentLayoutOffset.x,
+                y: display.y + canvas.contentLayoutOffset.y
+            )
+            canvas.beginInteraction(at: point)
+            canvas.endInteraction(at: point)
+            XCTAssertEqual(received.last, expected)
+        }
+
+        var crop: ImageRect?
+        canvas.onCrop = { crop = $0 }
+        canvas.isCropEditingEnabled = true
+        let start = layout.displayPoint(forNormalized: ImagePoint(x: 0, y: 0))
+        let end = layout.displayPoint(forNormalized: ImagePoint(x: 0.5, y: 0.5))
+        canvas.beginInteraction(at: CGPoint(
+            x: start.x + canvas.contentLayoutOffset.x,
+            y: start.y + canvas.contentLayoutOffset.y
+        ))
+        canvas.endInteraction(at: CGPoint(
+            x: end.x + canvas.contentLayoutOffset.x,
+            y: end.y + canvas.contentLayoutOffset.y
+        ))
+        XCTAssertEqual(crop, ImageRect(x: 0, y: 0, width: 0.5, height: 0.5))
+    }
+
+    func testViewportResizeRecomputesScrollableCanvasWithoutChangingRendererLayout() throws {
+        let canvas = try makeCanvas(scale: 2)
+
+        canvas.updateViewportSize(CGSize(width: 300, height: 600))
+
+        XCTAssertEqual(canvas.frame.size, CGSize(width: 600, height: 600))
+        assertPoint(canvas.contentLayoutOffset, x: 150, y: 0)
+        let layout = try XCTUnwrap(canvas.layout)
+        assertRect(layout.imageRect, x: -150, y: 150, width: 600, height: 300)
+
+        canvas.updateViewportSize(CGSize(width: 400, height: 400))
+        canvas.document?.displayScale = 0.5
+        canvas.updateContentLayout()
+
+        XCTAssertEqual(canvas.frame.size, CGSize(width: 400, height: 400))
+        assertPoint(canvas.contentLayoutOffset, x: 0, y: 0)
+    }
+
     private func makeCanvas(
         scale: Double = 1,
         crop: ImageRect = .full,

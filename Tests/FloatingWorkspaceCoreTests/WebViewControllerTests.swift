@@ -202,6 +202,64 @@ final class WebViewControllerTests: XCTestCase {
         XCTAssertEqual(try evaluate("document.body.textContent", in: controller) as? String, "keep me")
     }
 
+    func testRequestedHTTPNavigationFinishingBlankShowsNetworkFailure() throws {
+        let controller = try makeController()
+        let navigation = try XCTUnwrap(controller.load(
+            url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/unreachable"))
+        ))
+        _ = controller.webView.loadHTMLString("", baseURL: nil)
+        controller.webView(controller.webView, didStartProvisionalNavigation: navigation)
+        controller.webView(controller.webView, didFinish: navigation)
+
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载失败")
+        XCTAssertTrue(controller.errorLabel.stringValue.hasPrefix("网络加载失败："))
+    }
+
+    func testOnlyLatestRequestedCancellationShowsNetworkFailure() throws {
+        let controller = try makeController()
+        let first = try XCTUnwrap(controller.load(url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/first"))))
+        let second = try XCTUnwrap(controller.load(url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/second"))))
+        let fallback = try loadHTML("<html><body><p>fallback</p></body></html>", in: controller)
+        let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        controller.webView(controller.webView, didStartProvisionalNavigation: first)
+        controller.webView(controller.webView, didStartProvisionalNavigation: second)
+        controller.webView(controller.webView, didStartProvisionalNavigation: fallback)
+
+        controller.webView(controller.webView, didFailProvisionalNavigation: first, withError: cancelled)
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+        XCTAssertEqual(controller.statusLabel.stringValue, "正在加载")
+
+        controller.webView(controller.webView, didFailProvisionalNavigation: second, withError: cancelled)
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载失败")
+        XCTAssertTrue(controller.errorLabel.stringValue.hasPrefix("网络加载失败："))
+    }
+
+    func testBlankCompletionAfterFailureKeepsErrorUntilNextSuccessfulNavigation() throws {
+        let controller = try makeController()
+        let navigation = try loadHTML("<html><body><p>keep me</p></body></html>", in: controller)
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorCannotConnectToHost,
+            userInfo: [NSLocalizedDescriptionKey: "Could not connect to the server."]
+        )
+        controller.webView(controller.webView, didStartProvisionalNavigation: navigation)
+        controller.webView(controller.webView, didFailProvisionalNavigation: navigation, withError: error)
+        XCTAssertEqual(controller.errorLabel.stringValue, "网络加载失败：Could not connect to the server.")
+
+        controller.webView(controller.webView, didStartProvisionalNavigation: navigation)
+        controller.webView(controller.webView, didFinish: navigation)
+
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载失败")
+        XCTAssertEqual(controller.errorLabel.stringValue, "网络加载失败：Could not connect to the server.")
+
+        let next = try loadHTML("<html><body><p>next</p></body></html>", in: controller)
+        controller.load(url: try XCTUnwrap(URL(string: "http://127.0.0.1:9/next")))
+        controller.webView(controller.webView, didStartProvisionalNavigation: next)
+        controller.webView(controller.webView, didFinish: next)
+        XCTAssertEqual(controller.statusLabel.stringValue, "加载完成")
+        XCTAssertEqual(controller.errorLabel.stringValue, "")
+    }
+
     func testCertificateFailureShowsReadableErrorAndPreservesCurrentBody() throws {
         let controller = try makeController()
         let navigation = try loadHTML("<html><body><p>keep me</p></body></html>", in: controller)

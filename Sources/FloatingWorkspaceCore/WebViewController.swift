@@ -24,6 +24,9 @@ public final class WebViewController: NSViewController {
     private var draftFlushCompletions: [(Result<Void, Error>) -> Void] = []
     private var replayAttempted = false
     private var navigationGeneration = 0
+    private var navigationFailureGeneration: Int?
+    private var latestRequestedNavigation: WKNavigation?
+    private var latestRequestedURL: URL?
     private var currentDocumentURL: URL?
     private var allowMainFrameNavigationAfterFlushFailure = false
     private var pendingDraftLossWarning: String?
@@ -59,19 +62,24 @@ public final class WebViewController: NSViewController {
         layoutContent()
     }
 
-    public func load(url: URL) {
+    @discardableResult
+    public func load(url: URL) -> WKNavigation? {
         if let message = validationError(for: url) {
             showError(message)
-            return
+            return nil
         }
 
         errorLabel.stringValue = ""
         urlField.stringValue = url.absoluteString
         statusLabel.stringValue = "正在加载"
+        navigationFailureGeneration = nil
         if currentDocumentURL == nil {
             currentDocumentURL = webView.url
         }
-        webView.load(URLRequest(url: url))
+        let navigation = webView.load(URLRequest(url: url))
+        latestRequestedNavigation = navigation
+        latestRequestedURL = url
+        return navigation
     }
 
     @objc public func openURLFromField() {
@@ -372,7 +380,14 @@ extension WebViewController: WKUIDelegate {
 
 extension WebViewController: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        if navigationFailureGeneration != nil, webView.url?.absoluteString == "about:blank" {
+            return
+        }
         navigationGeneration += 1
+        if latestRequestedNavigation == nil {
+            latestRequestedNavigation = navigation
+            latestRequestedURL = nil
+        }
         replayAttempted = false
         isEditing = false
         hasPendingDraftChanges = false
@@ -391,6 +406,25 @@ extension WebViewController: WKNavigationDelegate {
     }
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView.url?.absoluteString == "about:blank",
+           latestRequestedNavigation === navigation,
+           let requestedURL = latestRequestedURL {
+            latestRequestedNavigation = nil
+            latestRequestedURL = nil
+            statusLabel.stringValue = "加载失败"
+            showError(pendingDraftLossWarning ?? "网络加载失败：无法加载 \(requestedURL.absoluteString)")
+            updateNavigationButtons()
+            return
+        }
+        // A failed load can produce later about:blank starts/finishes in new generations.
+        // Suppress those fallback completions until an actual destination succeeds.
+        if navigationFailureGeneration != nil {
+            let completedURL = webView.url?.absoluteString
+            guard completedURL != nil, completedURL != "about:blank" else { return }
+            navigationFailureGeneration = nil
+        }
+        latestRequestedNavigation = nil
+        latestRequestedURL = nil
         currentDocumentURL = webView.url
         statusLabel.stringValue = "加载完成"
         errorLabel.stringValue = pendingDraftLossWarning ?? ""
@@ -431,11 +465,11 @@ extension WebViewController: WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
-        handleNavigationFailure(error)
+        handleNavigationFailure(error, navigation: navigation)
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        handleNavigationFailure(error)
+        handleNavigationFailure(error, navigation: navigation)
     }
 
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -482,12 +516,14 @@ extension WebViewController: WKNavigationDelegate {
         if allowMainFrameNavigationAfterFlushFailure {
             allowMainFrameNavigationAfterFlushFailure = false
             discardPendingDraftChangesShowingLossWarning()
+            navigationFailureGeneration = nil
             decisionHandler(.allow)
             return
         }
         flushDraft(sourceURL: currentDocumentURL ?? webView.url) { result in
             switch result {
             case .success:
+                self.navigationFailureGeneration = nil
                 decisionHandler(.allow)
             case .failure:
                 decisionHandler(.cancel)
@@ -522,12 +558,15 @@ extension WebViewController: WKNavigationDelegate {
         return validationError(for: url) == nil ? .allow : .cancel
     }
 
-    private func handleNavigationFailure(_ error: Error) {
+    private func handleNavigationFailure(_ error: Error, navigation: WKNavigation?) {
         let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled,
+           navigation !== latestRequestedNavigation {
             return
         }
 
+        navigationFailureGeneration = navigationGeneration
+        latestRequestedURL = nil
         statusLabel.stringValue = "加载失败"
         switch nsError.code {
         case NSURLErrorServerCertificateHasBadDate,

@@ -13,7 +13,7 @@ public final class FloatingWindowController: NSObject {
     private var workspaceViewController: WorkspaceViewController?
     private var contentSubscription: AnyCancellable?
 
-    public init(store: ContentStore) {
+    public init(store: ContentStore, workspaceDirectory: URL? = nil) {
         self.store = store
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 540),
@@ -29,7 +29,11 @@ public final class FloatingWindowController: NSObject {
         panel.hasShadow = true
         panel.minSize = NSSize(width: 360, height: 320)
 
-        let workspace = WorkspaceViewController(store: store, windowController: self)
+        let workspace = WorkspaceViewController(
+            store: store,
+            windowController: self,
+            workspaceDirectory: workspaceDirectory
+        )
         workspaceViewController = workspace
         panel.contentViewController = workspace
         installPinAccessory()
@@ -137,7 +141,7 @@ public final class FloatingWindowController: NSObject {
         pinButton.toolTip = content.isPinned ? "点击取消置顶（⌃⌥⌘P）" : "点击置顶（⌃⌥⌘P）"
 
         switch content.selectedMode {
-        case .note, .web:
+        case .note, .image, .web:
             panel.title = "悬浮工作台"
             panel.backgroundColor = .clear
         case .blank:
@@ -149,8 +153,6 @@ public final class FloatingWindowController: NSObject {
                 blue: color.blue,
                 alpha: color.alpha
             )
-        case .image:
-            break
         }
     }
 }

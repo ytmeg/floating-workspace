@@ -13,6 +13,39 @@ private final class WorkspaceRootView: NSView {
 }
 
 @MainActor
+final class WorkspaceImageDropView: NSView {
+    var onFileURLs: (([URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let urls = fileURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        onFileURLs?(urls)
+        return true
+    }
+
+    private func fileURLs(from sender: any NSDraggingInfo) -> [URL] {
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [NSURL] ?? []
+        return objects.map { $0 as URL }
+    }
+}
+
+@MainActor
 public final class WorkspaceViewController: NSViewController, NSTextViewDelegate {
     let noteButton = NSButton()
     let imageButton = NSButton()
@@ -28,7 +61,9 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     let modeContainer = NSView()
     let noteScrollView = NSScrollView()
     let blankContainer = NSView()
+    let imageContainer = WorkspaceImageDropView()
     let webContainer = NSView()
+    public let imageViewController: ImageEditController
     public let webViewController: WebViewController
     let statusBar = NSView()
     let glassBackgroundView = GlassBackgroundView()
@@ -41,8 +76,17 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
     private weak var windowController: FloatingWindowController?
     private var subscriptions: Set<AnyCancellable> = []
 
-    public init(store: ContentStore, windowController: FloatingWindowController) {
+    public init(
+        store: ContentStore,
+        windowController: FloatingWindowController,
+        workspaceDirectory: URL? = nil
+    ) {
         self.store = store
+        let imageDirectory = workspaceDirectory ?? Self.defaultWorkspaceDirectory()
+        imageViewController = ImageEditController(store: ImageDocumentStore(
+            store: store,
+            workspaceDirectory: imageDirectory
+        ))
         self.webViewController = WebViewController(store: WebDraftStore(store: store))
         self.windowController = windowController
         super.init(nibName: nil, bundle: nil)
@@ -113,6 +157,37 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         store.update { $0.selectedMode = mode }
     }
 
+    @discardableResult
+    public func importImage(at url: URL, replacing: Bool) -> Bool {
+        do {
+            if replacing {
+                try imageViewController.replaceImage(at: url)
+            } else {
+                try imageViewController.importImage(at: url)
+            }
+            imageViewController.errorLabel.stringValue = ""
+            if store.content.selectedMode != .image {
+                selectMode(.image)
+            }
+            return true
+        } catch {
+            imageViewController.errorLabel.stringValue = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    public func exportImage(to url: URL) -> Bool {
+        do {
+            try imageViewController.exportImage(to: url)
+            imageViewController.errorLabel.stringValue = ""
+            return true
+        } catch {
+            imageViewController.errorLabel.stringValue = error.localizedDescription
+            return false
+        }
+    }
+
     public func textDidChange(_ notification: Notification) {
         guard notification.object as? NSTextView === noteTextView else { return }
         store.update { $0.noteText = noteTextView.string }
@@ -152,7 +227,6 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         configureModeButton(imageButton, title: "图片", symbolName: "photo", identifier: "mode-image", action: #selector(imageModeSelected))
         configureModeButton(webButton, title: "网页", symbolName: "globe", identifier: "mode-web", action: #selector(webModeSelected))
         configureModeButton(blankButton, title: "空白", symbolName: "square", identifier: "mode-blank", action: #selector(blankModeSelected))
-        imageButton.isEnabled = false
 
         let stack = NSStackView(views: [noteButton, imageButton, webButton, blankButton])
         stack.orientation = .vertical
@@ -208,6 +282,20 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         modeContainer.addSubview(blankContainer)
         buildBlankControls()
 
+        imageContainer.translatesAutoresizingMaskIntoConstraints = false
+        imageContainer.onFileURLs = { [weak self] urls in
+            guard let self else { return }
+            guard urls.count == 1, let url = urls.first else {
+                self.imageViewController.errorLabel.stringValue = "一次只支持拖入一张图片"
+                return
+            }
+            self.importImage(at: url, replacing: self.store.content.imageDocument != nil)
+        }
+        modeContainer.addSubview(imageContainer)
+        addChild(imageViewController)
+        imageViewController.view.translatesAutoresizingMaskIntoConstraints = false
+        imageContainer.addSubview(imageViewController.view)
+
         webContainer.translatesAutoresizingMaskIntoConstraints = false
         modeContainer.addSubview(webContainer)
         addChild(webViewController)
@@ -223,6 +311,14 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
             blankContainer.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
             blankContainer.topAnchor.constraint(equalTo: modeContainer.topAnchor),
             blankContainer.bottomAnchor.constraint(equalTo: modeContainer.bottomAnchor),
+            imageContainer.leadingAnchor.constraint(equalTo: modeContainer.leadingAnchor),
+            imageContainer.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
+            imageContainer.topAnchor.constraint(equalTo: modeContainer.topAnchor),
+            imageContainer.bottomAnchor.constraint(equalTo: modeContainer.bottomAnchor),
+            imageViewController.view.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
+            imageViewController.view.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
+            imageViewController.view.topAnchor.constraint(equalTo: imageContainer.topAnchor),
+            imageViewController.view.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
             webContainer.leadingAnchor.constraint(equalTo: modeContainer.leadingAnchor),
             webContainer.trailingAnchor.constraint(equalTo: modeContainer.trailingAnchor),
             webContainer.topAnchor.constraint(equalTo: modeContainer.topAnchor),
@@ -356,9 +452,12 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         // Cheap and idempotent; reset every emission so a re-clicked toggle cannot stay off.
         noteScrollView.isHidden = content.selectedMode != .note
         blankContainer.isHidden = content.selectedMode != .blank
+        imageContainer.isHidden = content.selectedMode != .image
         webContainer.isHidden = content.selectedMode != .web
         noteButton.state = content.selectedMode == .note ? .on : .off
         blankButton.state = content.selectedMode == .blank ? .on : .off
+        imageButton.isEnabled = WorkspaceMode.image.isEnabledInPhase1
+        imageButton.state = content.selectedMode == .image ? .on : .off
         webButton.isEnabled = WorkspaceMode.web.isEnabledInPhase1
         webButton.state = content.selectedMode == .web ? .on : .off
 
@@ -411,6 +510,7 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
 
         noteButton.contentTintColor = content.selectedMode == .note ? palette.accentColor : .labelColor
         blankButton.contentTintColor = content.selectedMode == .blank ? palette.accentColor : .labelColor
+        imageButton.contentTintColor = content.selectedMode == .image ? palette.accentColor : .labelColor
         webButton.contentTintColor = content.selectedMode == .web ? palette.accentColor : .labelColor
     }
 
@@ -429,6 +529,12 @@ public final class WorkspaceViewController: NSViewController, NSTextViewDelegate
         guard let panel = windowController?.panel else { return }
         widthField.stringValue = String(Int(panel.frame.width.rounded()))
         heightField.stringValue = String(Int(panel.frame.height.rounded()))
+    }
+
+    private static func defaultWorkspaceDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("FloatingWorkspace", isDirectory: true)
     }
 
     @objc private func noteModeSelected() {

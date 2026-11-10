@@ -30,7 +30,7 @@ public final class ContentStore: ObservableObject {
     ) throws {
         let result = try loader.load()
         var loaded = result.content
-        // Image is not available yet; the stored file keeps its mode until the next save.
+        // Unknown future modes fall back to note; the stored file stays untouched until the next save.
         if !loaded.selectedMode.isEnabledInPhase1 {
             loaded.selectedMode = .note
         }

@@ -41,6 +41,8 @@ public final class ImageCanvasView: NSView {
 
     private var interaction: Interaction?
     private var editingCrop: ImageRect?
+    private var viewportSize: CGSize?
+    private(set) var contentLayoutOffset: CGPoint = .zero
 
     var layout: ImageRenderer.Layout? {
         guard let image, let document else { return nil }
@@ -48,11 +50,30 @@ public final class ImageCanvasView: NSView {
             originalSize: CGSize(width: image.width, height: image.height),
             displayScale: document.displayScale,
             crop: document.cropRect,
-            viewSize: bounds.size
+            viewSize: viewportSize ?? bounds.size
         )
     }
 
     public override var acceptsFirstResponder: Bool { true }
+
+    func updateViewportSize(_ size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return }
+        viewportSize = size
+        updateContentLayout()
+    }
+
+    func updateContentLayout() {
+        guard let viewportSize else { return }
+        let viewport = CGRect(origin: .zero, size: viewportSize)
+        let content = layout?.imageRect.union(viewport) ?? viewport
+        contentLayoutOffset = CGPoint(x: -content.minX, y: -content.minY)
+        frame.size = content.size
+        needsDisplay = true
+    }
+
+    private func layoutPoint(forCanvasPoint point: CGPoint) -> CGPoint {
+        CGPoint(x: point.x - contentLayoutOffset.x, y: point.y - contentLayoutOffset.y)
+    }
 
     public override func mouseDown(with event: NSEvent) {
         beginInteraction(at: convert(event.locationInWindow, from: nil))
@@ -67,6 +88,7 @@ public final class ImageCanvasView: NSView {
     }
 
     func beginInteraction(at point: CGPoint) {
+        let point = layoutPoint(forCanvasPoint: point)
         guard let layout else { return }
         interaction = nil
         editingCrop = nil
@@ -104,6 +126,7 @@ public final class ImageCanvasView: NSView {
     }
 
     func continueInteraction(at point: CGPoint) {
+        let point = layoutPoint(forCanvasPoint: point)
         guard let layout, let interaction else { return }
         switch interaction {
         case let .pencil(points):
@@ -118,6 +141,7 @@ public final class ImageCanvasView: NSView {
     }
 
     func endInteraction(at point: CGPoint) {
+        let point = layoutPoint(forCanvasPoint: point)
         guard let layout, let interaction else { return }
         switch interaction {
         case let .pencil(points):
@@ -159,6 +183,9 @@ public final class ImageCanvasView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext,
               let layout, let image, let document else { return }
 
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.translateBy(x: contentLayoutOffset.x, y: contentLayoutOffset.y)
         context.draw(image, in: layout.imageRect)
         for annotation in document.annotations {
             ImageRenderer.draw(annotation, in: context, layout: layout)

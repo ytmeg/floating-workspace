@@ -1,5 +1,6 @@
 import AppKit
 import FloatingWorkspaceCore
+import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: ContentStore?
@@ -34,9 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             self.store = store
 
-            let windowController = FloatingWindowController(store: store)
+            let windowController = FloatingWindowController(
+                store: store,
+                workspaceDirectory: fileURL.deletingLastPathComponent()
+            )
             self.windowController = windowController
             workspaceViewController = windowController.panel.contentViewController as? WorkspaceViewController
+            configureImageWorkflow()
             menuBarController = MenuBarController(windowController: windowController)
             let hotkeyController = HotkeyController {
                 windowController.togglePinned()
@@ -108,6 +113,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return applicationSupport
             .appendingPathComponent("FloatingWorkspace", isDirectory: true)
             .appendingPathComponent("workspace-v1.json")
+    }
+
+    @MainActor
+    private func configureImageWorkflow() {
+        guard let workspace = workspaceViewController else { return }
+        workspace.imageViewController.onImportRequest = { [weak self] in
+            self?.presentImagePicker(replacing: false)
+        }
+        workspace.imageViewController.onReplaceRequest = { [weak self] in
+            self?.presentImagePicker(replacing: true)
+        }
+        workspace.imageViewController.onExport = { [weak self] _ in
+            self?.presentImageExportPanel()
+        }
+    }
+
+    @MainActor
+    private func presentImagePicker(replacing: Bool) {
+        let panel = NSOpenPanel()
+        panel.title = replacing ? "替换图片" : "导入图片"
+        panel.prompt = replacing ? "替换" : "导入"
+        panel.allowedContentTypes = [.png, .jpeg]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url, let workspace = self?.workspaceViewController else {
+                return
+            }
+            workspace.importImage(at: url, replacing: replacing)
+        }
+        if let window = windowController?.panel {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+        }
+    }
+
+    @MainActor
+    private func presentImageExportPanel() {
+        let panel = NSSavePanel()
+        panel.title = "导出图片"
+        panel.prompt = "导出"
+        panel.nameFieldStringValue = "FloatingWorkspace.png"
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.workspaceViewController?.exportImage(to: url)
+        }
+        if let window = windowController?.panel {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+        }
     }
 
     @MainActor

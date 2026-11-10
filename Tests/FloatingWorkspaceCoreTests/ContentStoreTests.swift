@@ -40,7 +40,7 @@ final class ContentStoreTests: XCTestCase {
         }
     }
 
-    func testDisabledPersistedImageModeOpensAsNoteWithoutSaving() throws {
+    func testPersistedImageModeOpensAsImageWithoutSaving() throws {
         var persisted = WorkspaceContent.default
         persisted.selectedMode = .image
         persisted.noteText = "保留正文"
@@ -53,7 +53,7 @@ final class ContentStoreTests: XCTestCase {
             saver: saver
         )
 
-        XCTAssertEqual(store.content.selectedMode, .note)
+        XCTAssertEqual(store.content.selectedMode, .image)
         XCTAssertEqual(store.content.noteText, "保留正文")
         XCTAssertFalse(store.isDirty)
         XCTAssertTrue(scheduler.delays.isEmpty)
@@ -80,7 +80,7 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertTrue(saver.snapshots.isEmpty)
     }
 
-    func testDisabledPersistedModeLeavesStoredFileUntouchedUntilNextSave() throws {
+    func testEnabledPersistedModeLeavesStoredFileUntouchedUntilNextSave() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -92,7 +92,7 @@ final class ContentStoreTests: XCTestCase {
 
         let store = try ContentStore(fileURL: file)
 
-        XCTAssertEqual(store.content.selectedMode, .note)
+        XCTAssertEqual(store.content.selectedMode, .image)
         XCTAssertEqual(try Data(contentsOf: file), original)
     }
 

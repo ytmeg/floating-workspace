@@ -272,7 +272,34 @@ final class ImageEditControllerTests: XCTestCase {
         XCTAssertTrue(controller.colorWell.target === controller)
         XCTAssertTrue(controller.cropButton.target === controller)
         XCTAssertTrue(controller.exportButton.target === controller)
-        XCTAssertEqual(controller.canvasView.superview, controller.view)
+        XCTAssertEqual(controller.canvasView.superview, controller.canvasScrollView.contentView)
+        XCTAssertEqual(controller.canvasScrollView.documentView, controller.canvasView)
+    }
+
+    func testZoomedCanvasScrollsToEveryImageRegion() throws {
+        let fixture = try makeFixture(document: makeDocument(scale: 2))
+        let controller = fixture.controller
+        controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 540)
+        controller.view.layoutSubtreeIfNeeded()
+
+        controller.updateCanvasViewport()
+
+        XCTAssertTrue(controller.canvasScrollView.hasHorizontalScroller)
+        XCTAssertTrue(controller.canvasScrollView.hasVerticalScroller)
+        XCTAssertEqual(controller.canvasScrollView.documentView, controller.canvasView)
+        let viewport = CGRect(origin: .zero, size: controller.canvasScrollView.contentSize)
+        let expectedContent = try XCTUnwrap(controller.canvasView.layout).imageRect.union(viewport)
+        XCTAssertEqual(controller.canvasView.frame.width, expectedContent.width, accuracy: 0.001)
+        XCTAssertEqual(controller.canvasView.frame.height, expectedContent.height, accuracy: 0.001)
+        XCTAssertGreaterThan(controller.canvasView.frame.width, controller.canvasScrollView.contentSize.width)
+        let visible = controller.canvasScrollView.contentView.bounds
+        controller.canvasScrollView.contentView.scrollToVisible(NSRect(
+            x: controller.canvasView.frame.width - visible.width,
+            y: 0,
+            width: visible.width,
+            height: visible.height
+        ))
+        XCTAssertGreaterThan(controller.canvasScrollView.contentView.bounds.origin.x, 0)
     }
 
     func testRepeatedEditsAndZoomDecodeImageOnlyOnce() throws {

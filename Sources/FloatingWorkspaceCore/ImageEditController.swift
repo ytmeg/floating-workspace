@@ -7,6 +7,7 @@ import ImageIO
 public final class ImageEditController: NSViewController {
     public let store: ImageDocumentStore
     public let canvasView = ImageCanvasView(frame: .zero)
+    public let canvasScrollView = NSScrollView()
 
     public let importButton = NSButton()
     public let replaceButton = NSButton()
@@ -63,6 +64,17 @@ public final class ImageEditController: NSViewController {
     public override func viewDidLoad() {
         super.viewDidLoad()
         refreshDocument()
+    }
+
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        updateCanvasViewport()
+    }
+
+    func updateCanvasViewport() {
+        let size = canvasScrollView.contentSize
+        guard size.width > 0, size.height > 0 else { return }
+        canvasView.updateViewportSize(size)
     }
 
     public func importImage(at url: URL) throws {
@@ -224,6 +236,7 @@ public final class ImageEditController: NSViewController {
     public func refreshDocument() {
         let document = store.document
         canvasView.document = document
+        defer { updateCanvasViewport() }
         zoomSlider.doubleValue = document?.displayScale ?? 1
         undoButton.isEnabled = document?.annotations.isEmpty == false
         clearButton.isEnabled = document?.annotations.isEmpty == false
@@ -235,6 +248,7 @@ public final class ImageEditController: NSViewController {
         guard let document else {
             cachedImage = nil
             canvasView.image = nil
+            errorLabel.stringValue = ""
             return
         }
         if let cachedImage, cachedImage.documentID == document.id {
@@ -327,19 +341,32 @@ public final class ImageEditController: NSViewController {
 
         textField.widthAnchor.constraint(equalToConstant: 140).isActive = true
         zoomSlider.widthAnchor.constraint(equalToConstant: 160).isActive = true
-        canvasView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(canvasView)
+        canvasScrollView.translatesAutoresizingMaskIntoConstraints = false
+        canvasScrollView.hasHorizontalScroller = true
+        canvasScrollView.hasVerticalScroller = true
+        canvasScrollView.borderType = .noBorder
+        canvasScrollView.drawsBackground = true
+        canvasScrollView.backgroundColor = .windowBackgroundColor
+        canvasScrollView.documentView = canvasView
+        canvasScrollView.setAccessibilityIdentifier("image-canvas-scroll")
+        view.addSubview(canvasScrollView)
         errorLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(errorLabel)
 
+        let toolbarTrailing = toolbar.trailingAnchor.constraint(
+            lessThanOrEqualTo: view.trailingAnchor,
+            constant: -12
+        )
+        toolbarTrailing.priority = .defaultLow
+
         NSLayoutConstraint.activate([
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            toolbar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+            toolbarTrailing,
             toolbar.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            canvasView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            canvasView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            canvasView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 8),
-            canvasView.bottomAnchor.constraint(equalTo: errorLabel.topAnchor, constant: -8),
+            canvasScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            canvasScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            canvasScrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 8),
+            canvasScrollView.bottomAnchor.constraint(equalTo: errorLabel.topAnchor, constant: -8),
             errorLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             errorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             errorLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8)

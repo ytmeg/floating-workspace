@@ -1,4 +1,7 @@
 import AppKit
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 @testable import FloatingWorkspaceCore
 
@@ -21,7 +24,7 @@ final class WorkspaceViewControllerTests: XCTestCase {
 
         XCTAssertTrue(fixture.workspace.noteButton.isEnabled)
         XCTAssertTrue(fixture.workspace.blankButton.isEnabled)
-        XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
+        XCTAssertTrue(fixture.workspace.imageButton.isEnabled)
         XCTAssertTrue(fixture.workspace.webButton.isEnabled)
         XCTAssertTrue(fixture.workspace.noteButton.isBordered)
         XCTAssertTrue(fixture.workspace.imageButton.isBordered)
@@ -82,7 +85,7 @@ final class WorkspaceViewControllerTests: XCTestCase {
         for button in buttons {
             XCTAssertEqual(button.frame.height, 44, accuracy: 0.001)
         }
-        XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
+        XCTAssertTrue(fixture.workspace.imageButton.isEnabled)
         XCTAssertTrue(fixture.workspace.webButton.isEnabled)
         XCTAssertEqual(fixture.workspace.noteButton.contentTintColor, palette.accentColor)
         XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, .labelColor)
@@ -96,6 +99,11 @@ final class WorkspaceViewControllerTests: XCTestCase {
 
         XCTAssertEqual(fixture.workspace.blankButton.contentTintColor, .labelColor)
         XCTAssertEqual(fixture.workspace.webButton.contentTintColor, palette.accentColor)
+
+        fixture.workspace.selectMode(.image)
+
+        XCTAssertEqual(fixture.workspace.webButton.contentTintColor, .labelColor)
+        XCTAssertEqual(fixture.workspace.imageButton.contentTintColor, palette.accentColor)
     }
 
     func testAppearanceChangesRefreshPaletteWithoutChangingOrSavingContent() throws {
@@ -130,8 +138,6 @@ final class WorkspaceViewControllerTests: XCTestCase {
             menu.menuNeedsUpdate(try XCTUnwrap(menu.statusItem.menu))
             XCTAssertEqual(pinItem.state, .on)
             XCTAssertEqual(workspace.noteTextView.string, "保留正文")
-            XCTAssertEqual(store.content.selectedMode, .note)
-            workspace.selectMode(.image)
             XCTAssertEqual(store.content.selectedMode, .note)
             XCTAssertTrue(store.content.isPinned)
         }
@@ -289,14 +295,29 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertEqual(fixture.workspace.noteButton.state, .off)
     }
 
-    func testDisabledImageModeLeavesWebSelectionUnchanged() throws {
+    func testImageModeInstallsOneEditorAndUpdatesVisibleContainer() throws {
         let fixture = try makeWorkspace()
-        fixture.workspace.selectMode(.web)
+        let editor = fixture.workspace.imageViewController
+        XCTAssertTrue(fixture.workspace.children.contains { $0 === editor })
+        XCTAssertTrue(editor.view.isDescendant(of: fixture.workspace.imageContainer))
+        XCTAssertTrue(fixture.workspace.imageContainer.isHidden)
 
+        fixture.workspace.selectMode(.web)
         fixture.workspace.selectMode(.image)
 
-        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .web)
-        XCTAssertFalse(fixture.workspace.imageButton.isEnabled)
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .image)
+        XCTAssertTrue(fixture.workspace.webContainer.isHidden)
+        XCTAssertTrue(fixture.workspace.noteScrollView.isHidden)
+        XCTAssertTrue(fixture.workspace.blankContainer.isHidden)
+        XCTAssertFalse(fixture.workspace.imageContainer.isHidden)
+        XCTAssertEqual(fixture.workspace.imageButton.state, .on)
+        XCTAssertEqual(fixture.workspace.webButton.state, .off)
+
+        fixture.workspace.selectMode(.blank)
+        XCTAssertTrue(fixture.workspace.imageContainer.isHidden)
+        fixture.workspace.selectMode(.image)
+        XCTAssertTrue(fixture.workspace.imageViewController === editor)
+        XCTAssertFalse(fixture.workspace.imageContainer.isHidden)
     }
 
     func testWebModeInstallsOneBrowserAndUpdatesVisibleContainer() throws {
@@ -490,14 +511,179 @@ final class WorkspaceViewControllerTests: XCTestCase {
         XCTAssertTrue(window.panel.contentViewController is WorkspaceViewController)
     }
 
-    private func makeWorkspace() throws -> (
+    func testBlankToImageRestoresDefaultPanelTitleAndBackground() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.blank)
+        fixture.workspace.blankTitleField.stringValue = "自定义空白"
+        fixture.workspace.blankTitleChanged()
+        fixture.workspace.colorWell.color = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
+        fixture.workspace.blankColorChanged()
+        XCTAssertEqual(fixture.window.panel.title, "自定义空白")
+
+        fixture.workspace.selectMode(.image)
+
+        XCTAssertEqual(fixture.window.panel.title, "悬浮工作台")
+        XCTAssertEqual(fixture.window.panel.backgroundColor, .clear)
+        XCTAssertFalse(fixture.workspace.imageContainer.isHidden)
+        XCTAssertTrue(fixture.workspace.blankContainer.isHidden)
+    }
+
+    func testImageDocumentEditsDoNotRestyleWorkspaceGlass() throws {
+        let fixture = try makeWorkspace()
+        fixture.workspace.selectMode(.image)
+        let updates = fixture.workspace.glassAppearanceUpdateCount
+        let invalidations = fixture.workspace.glassBackgroundView.gradientView.invalidationCount
+        let id = UUID().uuidString
+
+        fixture.doubles.store.update {
+            $0.imageDocument = ImageDocument(
+                id: id,
+                originalRelativePath: "Images/\(id).png",
+                displayScale: 2,
+                cropRect: ImageRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)
+            )
+        }
+        fixture.doubles.store.update { $0.noteText = "图片模式中的便签保存" }
+
+        XCTAssertEqual(fixture.workspace.glassAppearanceUpdateCount, updates)
+        XCTAssertEqual(fixture.workspace.glassBackgroundView.gradientView.invalidationCount, invalidations)
+        XCTAssertFalse(fixture.workspace.imageContainer.isHidden)
+        XCTAssertEqual(fixture.workspace.imageButton.state, .on)
+    }
+
+    func testImageImportDropAndFailuresShareVisibleEditorState() throws {
+        let root = try temporaryDirectory()
+        let workspaceURL = root.appendingPathComponent("Workspace", isDirectory: true)
+        let fixture = try makeWorkspace(workspaceDirectory: workspaceURL)
+        let source = root.appendingPathComponent("source.png")
+        try writeImage(to: source)
+        let originalBytes = try Data(contentsOf: source)
+
+        XCTAssertTrue(fixture.workspace.importImage(at: source, replacing: false))
+        let first = try XCTUnwrap(fixture.doubles.store.content.imageDocument)
+        let managed = workspaceURL.appendingPathComponent(first.originalRelativePath)
+        XCTAssertEqual(try Data(contentsOf: managed), originalBytes)
+        XCTAssertEqual(fixture.workspace.imageViewController.errorLabel.stringValue, "")
+        XCTAssertEqual(fixture.doubles.store.content.selectedMode, .image)
+
+        let moved = root.appendingPathComponent("moved-original.png")
+        try FileManager.default.moveItem(at: source, to: moved)
+        let reopened = WorkspaceViewController(
+            store: fixture.doubles.store,
+            windowController: fixture.window,
+            workspaceDirectory: workspaceURL
+        )
+        _ = reopened.view
+        XCTAssertNotNil(reopened.imageViewController.canvasView.image)
+        XCTAssertEqual(reopened.imageViewController.errorLabel.stringValue, "")
+
+        let second = root.appendingPathComponent("second.jpg")
+        try writeImage(to: second, type: .jpeg)
+        fixture.workspace.imageContainer.onFileURLs?([second])
+        let replacement = try XCTUnwrap(fixture.doubles.store.content.imageDocument)
+        XCTAssertNotEqual(replacement.id, first.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: managed.path))
+        XCTAssertEqual(try Data(contentsOf: moved), originalBytes)
+
+        let unsupported = root.appendingPathComponent("unsupported.gif")
+        try originalBytes.write(to: unsupported)
+        let corrupt = root.appendingPathComponent("corrupt.png")
+        try Data("not an image".utf8).write(to: corrupt)
+        let oversized = root.appendingPathComponent("oversized.png")
+        XCTAssertTrue(FileManager.default.createFile(atPath: oversized.path, contents: nil))
+        let handle = try XCTUnwrap(FileHandle(forWritingAtPath: oversized.path))
+        try handle.truncate(atOffset: 50 * 1024 * 1024 + 1)
+        try handle.close()
+
+        for (url, reason) in [
+            (unsupported, "PNG/JPEG"),
+            (corrupt, "decode"),
+            (oversized, "50MB")
+        ] {
+            XCTAssertFalse(fixture.workspace.importImage(at: url, replacing: true))
+            XCTAssertEqual(fixture.doubles.store.content.imageDocument, replacement)
+            XCTAssertTrue(
+                fixture.workspace.imageViewController.errorLabel.stringValue.contains(reason),
+                fixture.workspace.imageViewController.errorLabel.stringValue
+            )
+        }
+        XCTAssertEqual(try Data(contentsOf: moved), originalBytes)
+    }
+
+    func testImageExportWritesPNGAndShowsFailureWithoutMutatingDocument() throws {
+        let root = try temporaryDirectory()
+        let workspaceURL = root.appendingPathComponent("Workspace", isDirectory: true)
+        let fixture = try makeWorkspace(workspaceDirectory: workspaceURL)
+        let source = root.appendingPathComponent("source.png")
+        try writeImage(to: source)
+        XCTAssertTrue(fixture.workspace.importImage(at: source, replacing: false))
+        XCTAssertTrue(fixture.workspace.imageViewController.updateCrop(
+            ImageRect(x: 0.25, y: 0, width: 0.5, height: 0.5)
+        ))
+        XCTAssertTrue(fixture.workspace.imageViewController.addPencil(
+            points: [ImagePoint(x: 0.4, y: 0.5)],
+            color: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1),
+            width: 2
+        ))
+        let document = fixture.doubles.store.content.imageDocument
+        let destination = root.appendingPathComponent("exported.png")
+
+        XCTAssertTrue(fixture.workspace.exportImage(to: destination))
+
+        let exportedSource = try XCTUnwrap(CGImageSourceCreateWithURL(destination as CFURL, nil))
+        let exported = try XCTUnwrap(CGImageSourceCreateImageAtIndex(exportedSource, 0, nil))
+        XCTAssertEqual(exported.width, 100)
+        XCTAssertEqual(exported.height, 50)
+        XCTAssertEqual(fixture.workspace.imageViewController.errorLabel.stringValue, "")
+
+        XCTAssertFalse(fixture.workspace.exportImage(to: root))
+        XCTAssertFalse(fixture.workspace.imageViewController.errorLabel.stringValue.isEmpty)
+        XCTAssertEqual(fixture.doubles.store.content.imageDocument, document)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func writeImage(to url: URL, type: UTType = .png) throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 200,
+            height: 100,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL,
+            type.identifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
+    private func makeWorkspace(workspaceDirectory: URL? = nil) throws -> (
         workspace: WorkspaceViewController,
         window: FloatingWindowController,
         doubles: ContentStoreTestDoubles
     ) {
         let doubles = try ContentStoreTestDoubles()
-        let window = FloatingWindowController(store: doubles.store)
-        let workspace = WorkspaceViewController(store: doubles.store, windowController: window)
+        let window = FloatingWindowController(store: doubles.store, workspaceDirectory: workspaceDirectory)
+        let workspace = WorkspaceViewController(
+            store: doubles.store,
+            windowController: window,
+            workspaceDirectory: workspaceDirectory
+        )
         _ = workspace.view
         return (workspace, window, doubles)
     }
