@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -178,5 +179,152 @@ public enum ImageRenderer {
                 y: min(max(point.y, rect.minY), rect.maxY)
             )
         }
+    }
+
+    /// Renders in original-image pixel coordinates. The context translation defines the
+    /// export mapping: exportPixel = originalPixel - cropRect.origin, with no resampling.
+    @MainActor
+    static func render(
+        image: CGImage,
+        annotations: [ImageAnnotation],
+        cropRect: CGRect
+    ) throws -> CGImage {
+        guard cropRect.origin.x.isFinite, cropRect.origin.y.isFinite,
+              cropRect.width.isFinite, cropRect.height.isFinite,
+              cropRect.width >= 1, cropRect.height >= 1,
+              cropRect.width <= CGFloat(Int.max), cropRect.height <= CGFloat(Int.max),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw error("无法创建图片渲染上下文", code: 1)
+        }
+        let originalSize = CGSize(width: image.width, height: image.height)
+        guard let layout = Layout(
+            originalSize: originalSize,
+            displayScale: 1,
+            crop: .full,
+            viewSize: originalSize
+        ), let context = CGContext(
+            data: nil,
+            width: Int(cropRect.width),
+            height: Int(cropRect.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            throw error("无法创建图片渲染上下文", code: 1)
+        }
+
+        context.interpolationQuality = .none
+        context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
+        context.draw(image, in: layout.imageRect)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        for annotation in annotations {
+            draw(annotation, in: context, layout: layout)
+        }
+        guard let rendered = context.makeImage() else {
+            throw error("无法生成导出位图", code: 2)
+        }
+        return rendered
+    }
+
+    @MainActor
+    private static func draw(
+        _ annotation: ImageAnnotation,
+        in context: CGContext,
+        layout: Layout
+    ) {
+        context.saveGState()
+        defer { context.restoreGState() }
+        switch annotation {
+        case let .pencil(points, color, width):
+            guard let first = points.first else { return }
+            let displayPoints = points.map(layout.displayPoint(forNormalized:))
+            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
+            context.setStrokeColor(cgColor(color))
+            context.setFillColor(cgColor(color))
+            context.setLineWidth(displayWidth)
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+            if displayPoints.count == 1, let point = displayPoints.first {
+                context.fillEllipse(in: CGRect(
+                    x: point.x - displayWidth / 2,
+                    y: point.y - displayWidth / 2,
+                    width: displayWidth,
+                    height: displayWidth
+                ))
+                return
+            }
+            context.beginPath()
+            context.move(to: layout.displayPoint(forNormalized: first))
+            for point in displayPoints.dropFirst() {
+                context.addLine(to: point)
+            }
+            context.strokePath()
+        case let .text(content, color, fontSize, position):
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(
+                    ofSize: max(1, CGFloat(fontSize) * layout.displayPointsPerOriginalPixel)
+                ),
+                .foregroundColor: nsColor(color)
+            ]
+            // Match the canvas exactly: this is the attributed text box's bottom-left,
+            // not a font baseline. Do not replace with CTLineDraw or a flipped context.
+            NSAttributedString(string: content, attributes: attributes)
+                .draw(at: layout.textOrigin(forNormalized: position))
+        case let .arrow(start, end, color, width):
+            let displayStart = layout.displayPoint(forNormalized: start)
+            let displayEnd = layout.displayPoint(forNormalized: end)
+            let displayWidth = max(1, CGFloat(width) * layout.displayPointsPerOriginalPixel)
+            context.setStrokeColor(cgColor(color))
+            context.setFillColor(cgColor(color))
+            context.setLineWidth(displayWidth)
+            context.setLineCap(.round)
+            context.beginPath()
+            context.move(to: displayStart)
+            context.addLine(to: displayEnd)
+            context.strokePath()
+
+            let angle = atan2(displayEnd.y - displayStart.y, displayEnd.x - displayStart.x)
+            let headLength = max(8, displayWidth * 3)
+            let headAngle = CGFloat.pi / 6
+            let first = CGPoint(
+                x: displayEnd.x - headLength * cos(angle - headAngle),
+                y: displayEnd.y - headLength * sin(angle - headAngle)
+            )
+            let second = CGPoint(
+                x: displayEnd.x - headLength * cos(angle + headAngle),
+                y: displayEnd.y - headLength * sin(angle + headAngle)
+            )
+            context.beginPath()
+            context.move(to: displayEnd)
+            context.addLine(to: first)
+            context.addLine(to: second)
+            context.closePath()
+            context.fillPath()
+        }
+    }
+
+    private static func nsColor(_ color: RGBAColor) -> NSColor {
+        NSColor(
+            srgbRed: color.red,
+            green: color.green,
+            blue: color.blue,
+            alpha: color.alpha
+        )
+    }
+
+    private static func cgColor(_ color: RGBAColor) -> CGColor {
+        nsColor(color).cgColor
+    }
+
+    private static func error(_ message: String, code: Int) -> NSError {
+        NSError(
+            domain: "ImageRenderer",
+            code: code,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
     }
 }

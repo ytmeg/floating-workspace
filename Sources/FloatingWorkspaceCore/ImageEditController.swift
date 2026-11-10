@@ -28,7 +28,7 @@ public final class ImageEditController: NSViewController {
     public private(set) var isCropEditing = false
     public var onImportRequest: (() -> Void)?
     public var onReplaceRequest: (() -> Void)?
-    /// Task 3 supplies the actual exporter; this task only routes the current document.
+    /// Workspace integration presents the save panel and routes the chosen URL to exportImage(to:).
     public var onExport: ((ImageDocument) -> Void)?
 
     private var annotationColor = RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
@@ -214,6 +214,11 @@ public final class ImageEditController: NSViewController {
         onExport?(document)
     }
 
+    public func exportImage(to destinationURL: URL) throws {
+        guard let document = store.document else { return }
+        try ImageExporter(store: store).export(document: document, to: destinationURL)
+    }
+
     public func refreshDocument() {
         let document = store.document
         canvasView.document = document
@@ -265,7 +270,7 @@ public final class ImageEditController: NSViewController {
         configure(button: arrowButton, title: "箭头", identifier: "image-tool-arrow", action: #selector(arrowSelected), toggle: true)
         configure(button: undoButton, title: "撤销", identifier: "image-undo", action: #selector(undoAnnotation))
         configure(button: clearButton, title: "清空", identifier: "image-clear", action: #selector(clearAnnotations))
-        configure(button: exportButton, title: "导出", identifier: "image-export", action: #selector(exportImage))
+        configure(button: exportButton, title: "导出", identifier: "image-export", action: #selector(exportRequested))
 
         zoomSlider.minValue = 0.1
         zoomSlider.maxValue = 4
@@ -390,6 +395,10 @@ public final class ImageEditController: NSViewController {
 
     @objc private func replaceRequested() {
         onReplaceRequest?()
+    }
+
+    @objc private func exportRequested() {
+        exportImage()
     }
 
     @objc private func deleteRequested() {
