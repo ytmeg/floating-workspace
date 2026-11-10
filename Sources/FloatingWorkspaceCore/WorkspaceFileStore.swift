@@ -20,9 +20,12 @@ public struct WorkspaceFileStore: WorkspacePersisting {
         }
 
         let data = try Data(contentsOf: fileURL)
-        let content: WorkspaceContent
+        var content: WorkspaceContent
         do {
             content = try JSONDecoder().decode(WorkspaceContent.self, from: data)
+            // A hand-edited image document that save() would reject must not load and then
+            // block every later save, so it takes the same recovery path as corrupt JSON.
+            content.imageDocument = try content.imageDocument?.normalized()
         } catch {
             return try recoverOriginal()
         }
