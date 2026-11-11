@@ -48,7 +48,8 @@ final class EditMenuControllerTests: XCTestCase {
         ])
         for item in menu.items { XCTAssertNil(item.target) }
         XCTAssertEqual(menu.items.map(\ .keyEquivalent), ["c", "v", "x", "a", "z", "Z"])
-        XCTAssertEqual(menu.items.last?.keyEquivalentModifierMask, .shift)
+        XCTAssertEqual(menu.items.dropLast().map(\ .keyEquivalentModifierMask), Array(repeating: .command, count: 5))
+        XCTAssertEqual(menu.items.last?.keyEquivalentModifierMask, [.command, .shift])
     }
 
     func testRealTextViewCopyPasteCutAndUndoRedo() throws {
