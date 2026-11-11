@@ -140,7 +140,7 @@ final class AppDelegateTests: XCTestCase {
 
         XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateLater)
         fixture.saver.completeFailure(at: 0)
-        drainTerminationQueue()
+        waitForTerminationCondition { failureAlert != nil }
 
         let alert = try XCTUnwrap(failureAlert)
         XCTAssertEqual(alert.buttons.map(\.title), ["重试", "放弃未保存内容并退出"])
@@ -574,4 +574,12 @@ private final class TerminationWorkspaceSaver: WorkspaceSaving {
 @MainActor
 private func drainTerminationQueue() {
     RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+}
+
+@MainActor
+private func waitForTerminationCondition(_ condition: () -> Bool, timeout: TimeInterval = 2) {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
 }
