@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class EditMenuControllerTests: XCTestCase {
+    private var previousActivationPolicy: NSApplication.ActivationPolicy?
+    private var testWindow: NSWindow?
+
+    override func tearDown() {
+        testWindow?.orderOut(nil)
+        testWindow = nil
+        if let previousActivationPolicy {
+            _ = NSApp.setActivationPolicy(previousActivationPolicy)
+        }
+        previousActivationPolicy = nil
+        super.tearDown()
+    }
+
     func testMenuUsesStandardSelectorsAndShortcuts() {
         let menu = EditMenuController.makeMenu()
         let actions = menu.items.map(\.title)
@@ -15,22 +28,27 @@ final class EditMenuControllerTests: XCTestCase {
         ])
         for item in menu.items { XCTAssertNil(item.target) }
         XCTAssertEqual(menu.items.map(\.keyEquivalent), ["c", "v", "x", "a", "z", "Z"])
-        XCTAssertEqual(menu.items.last?.keyEquivalentModifierMask, .shift)
+        XCTAssertEqual(menu.items.map(\.keyEquivalentModifierMask), [
+            .command, .command, .command, .command, .command, [.command, .shift]
+        ])
     }
 
     func testRealTextViewCopyPasteCutAndUndoRedo() throws {
         _ = NSApplication.shared
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 180), styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isFloatingPanel = true
+        window.hidesOnDeactivate = false
+        testWindow = window
         let text = NSTextView(frame: window.contentView!.bounds)
         text.allowsUndo = true
         window.contentView!.addSubview(text)
-        let previousNextResponder = NSApp.nextResponder
-        defer {
-            NSApp.nextResponder = previousNextResponder
-        }
+        previousActivationPolicy = NSApp.activationPolicy()
+        XCTAssertTrue(NSApp.setActivationPolicy(.regular))
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        waitForKeyWindow(window)
         XCTAssertTrue(window.makeFirstResponder(text))
         XCTAssertTrue(window.firstResponder === text)
-        NSApp.nextResponder = text
         text.string = "hello"
         text.selectAll(nil)
         XCTAssertTrue(NSApp.sendAction(#selector(NSTextView.copy(_:)), to: nil, from: nil))
@@ -43,11 +61,6 @@ final class EditMenuControllerTests: XCTestCase {
         XCTAssertTrue(NSApp.sendAction(#selector(NSTextView.cut(_:)), to: nil, from: nil))
         XCTAssertEqual(text.string, "")
         closeUndoGroup(using: undoManager)
-        let undoRedoResponder = UndoRedoResponder(undoManager: undoManager)
-        let originalTextNextResponder = text.nextResponder
-        text.nextResponder = undoRedoResponder
-        undoRedoResponder.nextResponder = originalTextNextResponder
-        defer { text.nextResponder = originalTextNextResponder }
         let undoAction = NSSelectorFromString("undo:")
         XCTAssertTrue(NSApp.sendAction(undoAction, to: nil, from: nil))
         XCTAssertEqual(text.string, "hello")
@@ -55,31 +68,22 @@ final class EditMenuControllerTests: XCTestCase {
         XCTAssertEqual(text.string, "")
     }
 
+    private func waitForKeyWindow(_ window: NSWindow, timeout: TimeInterval = 2) {
+        let becameKey = expectation(description: "Window became key")
+        let timer = Timer(timeInterval: 0.01, repeats: true) { timer in
+            guard window.isKeyWindow else { return }
+            becameKey.fulfill()
+            timer.invalidate()
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        wait(for: [becameKey], timeout: timeout)
+        timer.invalidate()
+        XCTAssertTrue(window.isKeyWindow)
+    }
+
     private func closeUndoGroup(using manager: UndoManager) {
         guard manager.groupingLevel > 0 else { return }
         let closed = expectation(forNotification: .NSUndoManagerDidCloseUndoGroup, object: manager)
         wait(for: [closed], timeout: 1)
-    }
-}
-
-@MainActor
-private final class UndoRedoResponder: NSResponder {
-    private let manager: UndoManager
-
-    init(undoManager: UndoManager) {
-        manager = undoManager
-        super.init()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc func undo(_ sender: Any?) {
-        manager.undo()
-    }
-
-    @objc func redo(_ sender: Any?) {
-        manager.redo()
     }
 }

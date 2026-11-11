@@ -29,12 +29,13 @@ public enum EditMenuController {
             action: NSSelectorFromString("undo:"),
             keyEquivalent: "z"
         ))
+        for item in menu.items { item.keyEquivalentModifierMask = .command }
         let redo = NSMenuItem(
             title: "重做",
             action: NSSelectorFromString("redo:"),
             keyEquivalent: "Z"
         )
-        redo.keyEquivalentModifierMask = .shift
+        redo.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(redo)
         return menu
     }
