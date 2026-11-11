@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.hotkeyController = hotkeyController
             windowController.show()
+            EditMenuController.install(on: NSApp)
 
             if let recoveryURL = store.recoveryURL {
                 presentRecovery(recoveryURL)
