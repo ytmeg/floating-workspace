@@ -3,7 +3,7 @@
 - 日期：2026-11-02
 - 状态：总体架构、界面布局、第一阶段交互与验收均已由用户确认
 - 工作名：悬浮工作台
-- 项目仓库：`/Users/mi/AIWorkSpace/macos-window-pin`
+- 项目仓库：`/Users/moni/AIWorkSpace/macos-window-pin`
 
 ## 1. 背景与方向调整
 

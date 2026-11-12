@@ -165,7 +165,7 @@ do {
 Run:
 
 ```bash
-cd /Users/mi/AIWorkSpace/macos-window-pin
+cd /Users/moni/AIWorkSpace/macos-window-pin
 xcrun swift run WindowPinProbe info
 ```
 
@@ -287,7 +287,7 @@ if (axResult != kAXErrorSuccess) {
 Run:
 
 ```bash
-cd /Users/mi/AIWorkSpace/macos-window-pin
+cd /Users/moni/AIWorkSpace/macos-window-pin
 xcrun swift build --product WindowPinProbe
 open -a Safari
 .build/debug/WindowPinProbe info
@@ -300,7 +300,7 @@ Expected: PASS with a nonzero Safari `windowID`, Safari's PID, and a numeric lev
 Run:
 
 ```bash
-cd /Users/mi/AIWorkSpace/macos-window-pin
+cd /Users/moni/AIWorkSpace/macos-window-pin
 mkdir -p .artifacts/probe
 open -a Safari
 script -q .artifacts/probe/macOS-26.6.2.log .build/debug/WindowPinProbe verify
@@ -1031,7 +1031,7 @@ The user reviews the copyright line before any future GitHub publication.
 - [ ] **Step 4: Run all automated checks**
 
 ```bash
-cd /Users/mi/AIWorkSpace/macos-window-pin
+cd /Users/moni/AIWorkSpace/macos-window-pin
 xcrun swift test
 xcrun swift build -c release --product WindowPinProbe
 Scripts/build-app.sh

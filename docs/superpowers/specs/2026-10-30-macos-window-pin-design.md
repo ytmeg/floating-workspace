@@ -3,7 +3,7 @@
 - 日期：2026-10-30
 - 状态：交互与技术方向已由用户确认
 - 工作名：窗口置顶
-- 本地仓库：`/Users/mi/AIWorkSpace/macos-window-pin`
+- 本地仓库：`/Users/moni/AIWorkSpace/macos-window-pin`
 
 ## 1. 目标
 
